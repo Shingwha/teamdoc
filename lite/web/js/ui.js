@@ -312,7 +312,8 @@ window.UI = (function () {
    *          id?:string, title?:string, type?:string, disabled?:boolean,
    *          attrs?:string, cls?:string}} o
    *   kind: filled | tonal | outline | text | danger | danger-outline
-   *   size: 省略为页面级(40px);'sm' 行内级(32px);'lg' 登录页主按钮
+   *   size: 省略 = sm 档(32px,主操作由所在容器声明 --ctl-h 提升到 36/40);
+   *         'sm' 显式行内级(32px);'lg' 登录页主按钮(48px)
    */
   function btn(o) {
     o = o || {};
@@ -633,7 +634,7 @@ window.UI = (function () {
     setTimeout(function () {
       el.classList.add('out');
       setTimeout(function () { el.remove(); }, 250);
-    }, 3200);
+    }, 3000);
   }
   /** 统一错误提示(ApiError.message) */
   function err(e) { toast((e && e.message) || '操作失败', 'danger'); }
@@ -1001,7 +1002,11 @@ window.UI = (function () {
           (u.email || '').toLowerCase().indexOf(q) >= 0;
       });
       if (!rows.length) {
-        listEl.innerHTML = '<div class="pp-empty">' + (all.length ? '没有匹配的同事' : '暂无可选同事') + '</div>';
+        listEl.innerHTML = emptyHtml({
+          sm: true,
+          icon: 'team-line',
+          title: all.length ? '没有匹配的同事' : '暂无可选同事',
+        });
         return;
       }
       listEl.innerHTML = rows.map(function (u) {
@@ -1070,7 +1075,7 @@ window.UI = (function () {
       render();
       qEl.focus();
     }).catch(function (e) {
-      listEl.innerHTML = '<div class="pp-empty">' + esc(e.message || '加载失败') + '</div>';
+      listEl.innerHTML = error(e, { sm: true });
     });
     return m.result;
   }

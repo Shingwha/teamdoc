@@ -94,7 +94,8 @@ window.AdminSections = window.AdminSections || {};
               sub: '账号维度与来源维度的活跃计数' },
             { label: '登录事件总量', value: String(diag.loginEvents == null ? '—' : diag.loginEvents),
               sub: '含成功与失败' },
-          ]) + (rows || '<div class="muted mt-3">当前没有处于锁定冷却的账号。</div>'),
+          ]) + (rows || UI.emptyHtml({ sm: true, icon: 'shield-check-line',
+            title: '当前没有处于锁定冷却的账号' })),
       });
     }
 

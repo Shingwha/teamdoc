@@ -107,10 +107,7 @@ window.Views = window.Views || {};
 
         const factory = window.AdminSections && window.AdminSections[section];
         if (!factory) {
-          el.innerHTML = UI.banner({
-            kind: 'danger', icon: 'error-warning-line',
-            text: '管理分区「' + def.label + '」的脚本未加载,请刷新页面重试。',
-          });
+          el.innerHTML = UI.error({ message: '管理分区「' + def.label + '」的脚本未加载,请刷新页面重试。' });
           return frag;
         }
 

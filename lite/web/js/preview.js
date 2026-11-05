@@ -73,7 +73,7 @@ window.Preview = (function () {
         }
       }).catch(function (e) {
         area.innerHTML =
-          UI.banner({ kind: 'danger', icon: 'error-warning-line', text: '无法预览:' + (e.message || '未知错误') });
+          UI.error({ message: '无法预览:' + (e.message || '未知错误') });
       });
     }
   }

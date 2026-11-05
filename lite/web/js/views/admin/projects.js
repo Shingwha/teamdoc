@@ -218,11 +218,11 @@ window.AdminSections = window.AdminSections || {};
       tableEl.innerHTML = UI.tableHead(HEADS, {
         tpl: TPL, cls: 'admin-projects-table acts-4', headId: 'admin-projects-head',
       }) + rows +
-        (list.length ? '' : '<div class="admin-table-empty">' + UI.emptyHtml({
+        (list.length ? '' : UI.emptyHtml({
           icon: 'folder-line',
           title: projects.length ? '没有匹配的空间' : '暂无协作空间',
           desc: projects.length ? '换个关键词试试' : '新建空间后即可邀请成员',
-        }) + '</div>');
+        }));
     }
 
     function load() {

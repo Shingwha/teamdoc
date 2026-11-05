@@ -76,9 +76,9 @@ window.AdminSections = window.AdminSections || {};
             })
           : '') +
         (o.missing > 0
-          ? UI.banner({
-              kind: 'danger', icon: 'error-warning-line', sm: true,
-              text: '有 ' + o.missing + ' 条文件记录在磁盘上找不到内容(可能被手动删除或磁盘故障)。' +
+          ? UI.error({
+              sm: true,
+              message: '有 ' + o.missing + ' 条文件记录在磁盘上找不到内容(可能被手动删除或磁盘故障)。' +
                 '建议从备份恢复,不建议直接删记录。',
             })
           : ''),
