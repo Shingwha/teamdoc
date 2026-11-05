@@ -527,7 +527,7 @@
   --col-check: var(--ctl-m);
   --col-size: 110px;
   --col-time: 170px;
-  --acts-n: 6;
+  /* 操作列档位(--acts-n)由 drive.css 按 8 个行内按钮声明 */
   --tpl: var(--col-check) minmax(0, 1fr) var(--col-size) var(--col-time) var(--col-acts);
   --divider: 50%;
 }

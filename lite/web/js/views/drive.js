@@ -499,7 +499,7 @@ window.Views = window.Views || {};
 
     /** 由文件夹树重建路径栈(刷新/深链用)。
      *  以前父链只存在会话内,刷新就回"全部文件" —— 现在从服务端的树里查出祖先链,
-     *  并顺带把 URL 里的 ?folder= 深链(搜索结果跳进来时带)解析成栈。 */
+     *  并顺带把 URL 里的 ?folder= 深链(命令面板结果跳进来时带)解析成栈。 */
     async function resolveStack(targetFolderId) {
       if (!targetFolderId) return;
       targetFolderId = UI.idOf(targetFolderId); // URL 深链进来先过形状(非法 → null)

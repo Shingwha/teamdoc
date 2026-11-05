@@ -102,12 +102,10 @@
   --font: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
 
-  /* 动效:150/200/300 三档 + standard/decelerate 两条曲线,无弹跳 */
+  /* 动效:150/200 两档 + standard 曲线,无弹跳 */
   --ease-standard: cubic-bezier(.2, 0, 0, 1);
-  --ease-decelerate: cubic-bezier(0, 0, 0, 1);
   --motion-fast: 150ms var(--ease-standard);
   --motion: 200ms var(--ease-standard);
-  --motion-slow: 300ms var(--ease-decelerate);
 
   /* 布局尺寸 */
   --topbar-h: 40px;
@@ -127,9 +125,7 @@
      常规页水平边距随视口连续缩放(500→16、875→28、之间线性),无 720 阶梯 */
   --g-page: clamp(var(--sp-4), 3.2vw, var(--sp-7));
 
-  /* 正文阅读行宽:与页宽无关的排版约束(行太长伤阅读)。
-     只用于文档编辑器的正文列 */
-  --w-read: 880px;
+  /* 正文阅读行宽由 editor.css 的编辑画布列直接声明(排版约束,与页宽无关) */
 
   /* 栅格列宽下限:grid 的 minmax 下限,决定"一行放几个"。
      项目卡 280 / 设置卡 340 / 文件瓦片 150 / 统计项 140 */

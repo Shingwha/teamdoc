@@ -179,11 +179,9 @@ window.Ref = (function () {
   }
 
   return {
-    doc: DOC_PREFIX, file: FILE_PREFIX,
-    docChip: docChip, fileChip: fileChip, fileMarkdown: fileMarkdown,
-    downloadUrl: downloadUrl, image: image, attachment: attachment,
+    docChip: docChip, fileMarkdown: fileMarkdown,
+    downloadUrl: downloadUrl,
     parse: parse,
-    openDoc: openDoc, openFile: openFile,
-    text: text, url: url, mustId: mustId,
+    text: text, url: url,
   };
 })();

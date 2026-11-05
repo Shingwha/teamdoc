@@ -41,7 +41,7 @@ window.UI = (function () {
   }
 
 
-  /** 按 mime 给出文件类型图标与配色类(全站唯一来源:云空间/搜索/最近文件共用)。
+  /** 按 mime 给出文件类型图标与配色类(全站唯一来源:云空间/命令面板/最近文件共用)。
    *  配色类 .fi-* 定义在 components.css,取 --file-* 固定色(主题无关,深色下不变) */
   function fileIcon(mime) {
     mime = mime || '';
@@ -167,7 +167,7 @@ window.UI = (function () {
   /** 可写(EDITOR+):上传/新建/编辑/删除内容、回收站的恢复与彻底删除 */
   function canEdit(proj) { return hasRole(proj, 'EDITOR'); }
   /** 能进入并读取(VIEWER+):真成员与全局管理员;公开项目**加入前** myRole 为
-   *  null 过不了这一档(镜像服务端 require_project_role("VIEWER"))。发现页的
+   *  null 过不了这一档(镜像服务端 require_project_role("VIEWER"))。发现空间页签的
    *  "先问要不要加入"不用它 —— 那里看 isMember(参与语义:加入才需要问;
    *  管辖直达走管理后台的模块直达按钮,不经广场)。 */
   function canRead(proj) { return hasRole(proj, 'VIEWER'); }
@@ -500,31 +500,25 @@ window.UI = (function () {
    * 列表行 HTML(弹性型:图标/头像 + 标题 + 副文本 + 徽标 + 操作)。
    * 需要"列与列对齐"的场景请改用 tableHead/tableRow。
    * @param {{icon?:string, iconCls?:string, avatar?:string, title:string, sub?:string,
-   *          badges?:string, meta?:string, actions?:string, raised?:boolean,
-   *          hoverable?:boolean, selected?:boolean, attrs?:string, cls?:string,
-   *          tag?:string, href?:string, subClamp?:boolean}} o
+   *          badges?:string, meta?:string, actions?:string,
+   *          selected?:boolean, attrs?:string, cls?:string}} o
    *   iconCls:图标配色类(fi-pdf 等);avatar:UI.avatar() 的产物,与 icon 二选一
    *   attrs:附加属性串(如 data-id="x");sub/badges/meta/actions 均为已拼好的 HTML
-   *   tag/href:整行作为链接时传 tag:'a' + href(搜索结果卡片)
-   *   subClamp:副文本最多两行(用于展示较长的片段)
    */
   function listRow(o) {
     o = o || {};
-    var cls = ['list-row', o.raised ? 'raised' : '', o.hoverable ? 'hoverable' : '',
-      o.selected ? 'selected' : '', o.cls || ''].filter(Boolean).join(' ');
-    var tag = o.tag || 'div';
-    return '<' + tag + ' class="' + cls + '"' +
-      (tag === 'a' && o.href ? ' href="' + esc(o.href) + '"' : '') +
+    var cls = ['list-row', o.selected ? 'selected' : '', o.cls || ''].filter(Boolean).join(' ');
+    return '<div class="' + cls + '"' +
       (o.attrs ? ' ' + o.attrs : '') + '>' +
       (o.avatar || '') +
       (o.icon ? icon(o.icon, 'row-icon' + (o.iconCls ? ' ' + o.iconCls : '')) : '') +
       '<div class="list-row-main">' +
       '<div class="list-row-title">' + o.title + (o.badges ? ' ' + o.badges : '') + '</div>' +
-      (o.sub ? '<div class="list-row-sub' + (o.subClamp ? ' clamp-2' : '') + '">' + o.sub + '</div>' : '') +
+      (o.sub ? '<div class="list-row-sub">' + o.sub + '</div>' : '') +
       '</div>' +
       (o.meta || '') +
       (o.actions ? '<div class="list-row-acts">' + o.actions + '</div>' : '') +
-      '</' + tag + '>';
+      '</div>';
   }
 
   /* ---------- 数据表格工厂 ---------- */
@@ -617,7 +611,7 @@ window.UI = (function () {
       '</a>';
   }
 
-  /** 项目卡的 "N 成员 · N 文档" 计数行(发现页与项目列表页同款;
+  /** 项目卡的 "N 成员 · N 文档" 计数行(发现空间页签与项目列表页同款;
    * 图标独占一格是为了图标与计数之间保留 meta 行的间距) */
   function projectCountMeta(p) {
     return [
@@ -1768,7 +1762,6 @@ window.UI = (function () {
     onMediaChange: onMediaChange,
     NARROW: NARROW,
     dualPanel: dualPanel,
-    panelOpenByDefault: panelOpenByDefault,
     /* 标记类工厂(HTML 字符串) */
     btn: btn,
     iconBtn: iconBtn,
