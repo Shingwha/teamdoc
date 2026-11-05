@@ -22,20 +22,21 @@ def _snippet(content: str, q: str) -> str:
 
 
 def _doc_row(d: Doc, project_name: str, snippet: str = "",
-             updated_by_name: str | None = None) -> dict:
+             updated_by_name: str | None = None, archived: bool = False) -> dict:
     return {"id": d.id, "projectId": d.project_id, "title": d.title,
             "projectName": project_name, "updatedAt": iso(d.updated_at),
             "updatedBy": d.updated_by, "updatedByName": updated_by_name,
-            "snippet": snippet}
+            "archived": bool(archived), "snippet": snippet}
 
 
-def _file_row(f: File, project_name: str) -> dict:
+def _file_row(f: File, project_name: str, archived: bool = False) -> dict:
     return {**file_json(f), "projectId": f.project_id, "folderId": f.folder_id,
-            "projectName": project_name}
+            "projectName": project_name, "archived": bool(archived)}
 
 
 def search(db: DbSession, ctx: Actor, q: str, type: str, limit: int,
-           *, project_id: str = "", updated_by: str = "") -> dict:
+           *, project_id: str = "", updated_by: str = "",
+           include_archived: bool = False) -> dict:
     q = (q or "").strip()
     if type not in TYPES:
         bad_request(f"type 必须为 {'/'.join(TYPES)}")
@@ -59,7 +60,14 @@ def search(db: DbSession, ctx: Actor, q: str, type: str, limit: int,
         visible = {project_id}
     if not visible:
         return {"docs": [], "files": []}
-    names = {p.id: p.name for p in db.query(Project).filter(Project.id.in_(visible)).all()}
+    projects = db.query(Project).filter(Project.id.in_(visible)).all()
+    names = {p.id: p.name for p in projects}
+    archived = {p.id: p.archived_at is not None for p in projects}
+    # 全局搜索默认排除归档空间；显式 projectId 表示用户已进入该空间，不做归档过滤。
+    if not project_id and not include_archived:
+        visible = {pid for pid in visible if not archived.get(pid, False)}
+        if not visible:
+            return {"docs": [], "files": []}
     like = f"%{q}%"
     docs_out, files_out = [], []
     if type in ("all", "docs"):
@@ -73,7 +81,8 @@ def search(db: DbSession, ctx: Actor, q: str, type: str, limit: int,
         for d in docs:
             docs_out.append(_doc_row(d, names.get(d.project_id, ""),
                                      "" if recent_mode else _snippet(d.content, q),
-                                     authors.get(d.updated_by)))
+                                     authors.get(d.updated_by),
+                                     archived.get(d.project_id, False)))
     if type in ("all", "files"):
         qy = db.query(File).filter(File.deleted_at.is_(None), File.project_id.in_(visible))
         if not recent_mode:
@@ -81,5 +90,6 @@ def search(db: DbSession, ctx: Actor, q: str, type: str, limit: int,
         if updated_by:
             qy = qy.filter(File.updated_by == updated_by)
         for f in qy.order_by(File.updated_at.desc()).limit(limit).all():
-            files_out.append(_file_row(f, names.get(f.project_id, "")))
+            files_out.append(_file_row(f, names.get(f.project_id, ""),
+                                       archived.get(f.project_id, False)))
     return {"docs": docs_out, "files": files_out}
