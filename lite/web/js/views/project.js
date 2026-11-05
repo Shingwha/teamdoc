@@ -321,7 +321,9 @@ window.SpaceSettings = (function () {
     function renderOverview() {
       const canAdmin = UI.canAdmin(proj);
       const dis = canAdmin ? '' : ' disabled';
-      const used = Number(proj.storageBytes || 0);
+      // 配额条与硬限制同口径：服务端 quotaUsedBytes 含历史版本与回收站；
+      // 旧数据缺该字段时回退 storageBytes（只算活跃文件）。
+      const used = Number(proj.quotaUsedBytes != null ? proj.quotaUsedBytes : proj.storageBytes || 0);
       const quota = Number(proj.quotaBytes || 0);
       const pct = quota > 0 ? Math.min(100, Math.round(used / quota * 100)) : 0;
       const color = proj.color || COLORS[0];
@@ -340,6 +342,7 @@ window.SpaceSettings = (function () {
         }) +
         UI.card({
           title: '存储配额', icon: 'hard-drive-3-line',
+          note: '用量为空间全部文件与历史版本、回收站的去重物理占用；达到上限后新上传、新版本与跨空间移入会被拒绝。',
           body:
             '<div class="ss-quota-line"><span>' + UI.fmtSize(used) + ' / ' +
             (quota > 0 ? UI.fmtSize(quota) : '不限制') + '</span>' +

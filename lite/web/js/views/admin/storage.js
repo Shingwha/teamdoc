@@ -85,18 +85,19 @@ window.AdminSections = window.AdminSections || {};
     });
   }
 
-  /** 配额策略卡:说明按空间 quotaBytes 计,80% 预警;近配额空间来自
+  /** 配额策略卡:说明按空间 quotaBytes 计,80% 预警、100% 拦截;近配额空间来自
    *  adminOverview().nearQuota(服务端按 ratio 降序),点击直接打开该空间的成员抽屉。 */
   function quotaCard(nearQuota, unavailable) {
     if (unavailable) {
       return UI.card({
         id: 'admin-quota-policy', title: '配额策略', icon: 'pie-chart-2-line',
-        note: '按空间设置配额(quotaBytes);用量达到 80% 时进入预警。配额只提示,不拦截上传。',
+        note: '按空间设置配额(quotaBytes);用量达到 80% 预警,达到上限后新上传、新版本与跨空间移入会被拒绝。',
         body: UI.banner({ kind: 'warn', icon: 'alert-line', sm: true, text: '近配额数据暂不可用,请稍后刷新。' }),
       });
     }
     const rows = (nearQuota || []).map((p) => {
-      const used = Number(p.storageBytes) || 0;
+      // 与硬限制同口径：优先服务端 usedBytes（含历史版本与回收站）。
+      const used = Number(p.usedBytes != null ? p.usedBytes : p.storageBytes) || 0;
       const quota = Number(p.quotaBytes) || 0;
       const pct = Number(p.percent) || (quota > 0 ? Math.round(used / quota * 100) : 0);
       return '<div class="admin-quota-row clickable" role="button" tabindex="0"' +
@@ -114,7 +115,7 @@ window.AdminSections = window.AdminSections || {};
     }).join('');
     return UI.card({
       id: 'admin-quota-policy', title: '配额策略', icon: 'pie-chart-2-line', between: true,
-      note: '按空间设置配额(quotaBytes);用量达到 80% 时进入预警。配额只提示,不拦截上传。',
+      note: '按空间设置配额(quotaBytes);用量为全部文件与历史版本、回收站的去重物理占用,达到 80% 预警、达到上限后新上传/新版本/跨空间移入会被拒绝。',
       body: rows || UI.emptyHtml({
         icon: 'pie-chart-line', title: '暂无接近配额的空间',
         desc: '任意协作空间用量达到配额的 80% 后会出现在这里', sm: true,
