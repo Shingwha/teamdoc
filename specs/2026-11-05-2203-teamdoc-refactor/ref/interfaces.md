@@ -113,3 +113,13 @@ W1 已完成并回写：上述文件接口与真实代码一致；`docId` 附件
 - 路由只做参数解析 → service → serialize；登录/初始化、恢复包 I/O、WS 保存/presence 已下沉 service。
 - 前端已删除 `views/recent.js` 与 `#/search`、`#/discover` 路由；搜索只走命令面板，发现只在空间切换器「发现空间」页签。
 - 测试保留口径：行为/HTTP/浏览器契约优先；静态测试只保留架构契约（layout/render/page assets/frontend refs），不再保留精确令牌清单或实现字符串断言。
+
+## W10 搜索与配额（最终）
+### 归档搜索
+- `GET /api/search` 新增 `includeArchived=1`（`1/true/yes`）。无 `projectId` 时默认排除 `archived_at` 非空的可见空间；显式 `projectId` 不做归档过滤（进入归档空间仍可读）。
+- doc/file 结果行增加 `archived: bool`。命令面板无显式空间路由时提供“包含归档”开关（`td:search-archived`），结果带“已归档”徽标。
+### 空间配额
+- 用量 `quotaUsedBytes` = 空间全部 File（含回收站）与全部 FileVersion 引用的去重物理路径大小之和（按 `storage_path` 去重，恢复共享路径只算一次）。
+- Project 成员/管理响应增加 `quotaUsedBytes`；`storageBytes` 仍为活跃文件口径。`nearQuota` 增加 `usedBytes` 并按 `quotaUsedBytes` 计算。
+- 新错误码 `QUOTA_EXCEEDED`（403），detail `{code,message,quotaBytes,usedBytes,requiredBytes}`。
+- 拦截：新上传、显式新版本、跨空间文件/文件夹移动。放行：读取/下载、软删/彻底删除/清空回收站、恢复历史版本、同空间移动、`quotaBytes` 空/0、个人空间。全局 `STORAGE_RESERVE_MB` 磁盘余量保护不变。
