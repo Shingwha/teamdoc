@@ -8,7 +8,7 @@
 
 /* 操作列按最多 8 个按钮取齐:预览/下载/上传新版本/版本历史/重命名/分享/移动/删除。
    多重类名是为了压过 app.css 里 .drive-table 的 6 档声明(加载顺序不敏感)。 */
-.data-table.drive-table { --acts-n: 8; }
+.data-table.drive-table { --acts-n: 8; --table-min: 860px; }
 
 /* hidden 必须真的不参与布局:UI.btn 的 .btn 是 display:inline-flex,
    会盖过浏览器默认的 [hidden]{display:none}。 */
@@ -25,8 +25,7 @@
 }
 .drive-name-stack .row-link { max-width: 100%; }
 .drive-name-sub {
-  font-size: var(--fs-xs);
-  line-height: 1.25;
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
   color: var(--md-on-surface-variant);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -46,7 +45,7 @@
   gap: var(--sp-0-5);
   padding: var(--sp-0-5);
   border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--md-surface-container-lowest) 92%, transparent);
+  background: color-mix(in srgb, var(--md-surface-container-high) 92%, transparent);
   box-shadow: var(--shadow-1);
   opacity: 0;
   pointer-events: none;
@@ -64,8 +63,7 @@
 /* 时间线里的版本备注(可空):与元信息同层,换行显示完整内容 */
 .drive-v-note {
   margin-top: var(--sp-1);
-  font-size: var(--fs-label);
-  line-height: var(--lh-normal);
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
   color: var(--md-on-surface);
   overflow-wrap: anywhere;
 }
@@ -111,10 +109,10 @@
   border-bottom: 1px solid var(--md-outline-variant);
 }
 .drive-drawer-heading { min-width: 0; }
-.drive-drawer-title { font-size: var(--fs-title); font-weight: var(--fw-semi); }
+.drive-drawer-title { font-size: var(--fs-title-lg); line-height: var(--lh-title-lg); font-weight: var(--fw-semi); }
 .drive-drawer-sub {
   margin-top: var(--sp-0-5);
-  font-size: var(--fs-label);
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
   color: var(--md-on-surface-variant);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -163,11 +161,11 @@
   gap: var(--sp-1-5);
   flex-wrap: wrap;
 }
-.drive-v-no { font-size: var(--fs-body); font-weight: var(--fw-semi); }
-.drive-v-when { font-size: var(--fs-label); color: var(--md-on-surface-variant); }
+.drive-v-no { font-size: var(--fs-body); line-height: var(--lh-body); font-weight: var(--fw-semi); }
+.drive-v-when { font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--md-on-surface-variant); }
 .drive-v-meta {
   margin-top: 1px;
-  font-size: var(--fs-label);
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
   color: var(--md-on-surface-variant);
 }
 .drive-v-acts {
@@ -200,14 +198,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.drive-conflict-tip { font-size: var(--fs-label); color: var(--md-on-surface-variant); }
+.drive-conflict-tip { font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--md-on-surface-variant); }
 .drive-conflict-mode { flex: none; width: 190px; }
 
-/* 契约身份 2(密度/功能:≤720 表格行重排为两行卡片;44px 定高在此让位给内容高,
-   名称下的版本元信息仍然可见) */
-@media (max-width: 720px) {
-  .drive-table .data-table-row {
-    height: auto;
-    min-height: var(--row-h);
-  }
-}
