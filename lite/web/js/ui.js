@@ -94,6 +94,13 @@ window.UI = (function () {
       p(d.getHours()) + ':' + p(d.getMinutes());
   }
 
+  /** 最后活跃文案:有值给日期;显式 null = 从未登录;字段缺失 = 未知。
+      成员列表与用户详情的「所属空间」共用这一份判定。 */
+  function lastActiveText(value) {
+    if (value) return '最后活跃 ' + fmtDateShort(value);
+    return value === null ? '从未活跃' : '最后活跃未知';
+  }
+
   /** 自适应时间:今天 10:09 / 昨天 18:03 / 9/11 14:20 / 2025-12-03 09:15。
       给"按时间找东西"的列表用(版本历史):近期的记录只关心几点几分,远期才需要完整日期。
       精度到分钟 —— 同一分钟内的多条靠副文本(作者、字数)区分,需要秒级精确时
@@ -134,8 +141,17 @@ window.UI = (function () {
   /* ---------- 角色 ---------- */
   var ROLE_RANK = { VIEWER: 0, EDITOR: 1, ADMIN: 2, OWNER: 3 };
   var ROLE_LABEL = { VIEWER: '只读成员', EDITOR: '编辑者', ADMIN: '管理员', OWNER: '所有者' };
+  /** 角色从高到低:所有角色下拉/筛选的顺序来源 */
+  var ROLES = ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'];
   function roleRank(r) { return ROLE_RANK[r] != null ? ROLE_RANK[r] : -1; }
   function roleLabel(r) { return ROLE_LABEL[r] || r || '-'; }
+  /** 角色下拉选项 HTML(selected 决定选中项;roles 缺省为全部四档) */
+  function roleOptions(selected, roles) {
+    return (roles || ROLES).map(function (r) {
+      return '<option value="' + esc(r) + '"' + (r === selected ? ' selected' : '') + '>' +
+        esc(roleLabel(r)) + '</option>';
+    }).join('');
+  }
 
   /* ---------- 项目权限判定 ----------
      myRole 是服务端 project_role 的综合结果:成员 → 成员角色(全局管理员加入后角色
@@ -1490,6 +1506,14 @@ window.UI = (function () {
     set: function (key, v) {
       try { localStorage.setItem(key, v); return true; } catch (e) { return false; }
     },
+    /** JSON 值读写(收藏、浏览记录这类列表偏好:解析/序列化只有这一份) */
+    getJSON: function (key, def) {
+      try { var v = JSON.parse(localStorage.getItem(key)); return v == null ? def : v; }
+      catch (e) { return def; }
+    },
+    setJSON: function (key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (e) { return false; }
+    },
     remove: function (key) { try { localStorage.removeItem(key); } catch (e) { /* 忽略 */ } },
   };
 
@@ -1688,12 +1712,16 @@ window.UI = (function () {
     icon: icon,
     fileIcon: fileIcon,
     fmtSize: fmtSize,
+    parseDate: parseDate,
     fmtDate: fmtDate,
     fmtDateShort: fmtDateShort,
     fmtWhen: fmtWhen,
+    lastActiveText: lastActiveText,
     copyText: copyText,
     roleRank: roleRank,
     roleLabel: roleLabel,
+    ROLES: ROLES,
+    roleOptions: roleOptions,
     canEdit: canEdit,
     canRead: canRead,
     canAdmin: canAdmin,

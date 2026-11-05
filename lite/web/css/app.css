@@ -639,7 +639,17 @@
 .ss-batch .select { width: 120px; }
 .ss-member .sel-box { flex: none; }
 .ss-member .list-row-acts { gap: var(--sp-1); }
-.ss-perms { border-top: 1px solid var(--md-outline-variant); padding-top: var(--sp-2); }
+/* 成员行 44px(§6.7②):次行 = 邮箱 · 最后活跃,两行在 44px 内居中 */
+.ss-member { height: 44px; min-height: 44px; padding-top: 0; padding-bottom: 0; }
+/* 权限说明常驻抽屉底部:列表再长也不用先滚到底才能查角色含义 */
+.ss-perms {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: var(--md-surface-container-high);
+  border-top: 1px solid var(--md-outline-variant);
+  padding-top: var(--sp-2);
+}
 .ss-perms summary { cursor: pointer; font-size: var(--fs-label); line-height: var(--lh-label); color: var(--md-on-surface-variant); }
 .ss-perm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); margin-top: var(--sp-2); font-size: var(--fs-caption); line-height: var(--lh-caption); }
 .ss-perm-grid b { display: block; color: var(--md-on-surface); }

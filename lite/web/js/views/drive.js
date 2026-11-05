@@ -9,7 +9,7 @@ window.Views = window.Views || {};
 (function () {
   'use strict';
 
-  // 文件类型图标与配色已提到组件库(搜索页/项目页等都要用,见 ui.js 的 UI.fileIcon)
+  // 文件类型图标与配色已提到组件库(命令面板/项目页等都要用,见 ui.js 的 UI.fileIcon)
   const fileIcon = UI.fileIcon;
 
   // 预览能力由服务端判定(行内带 canInline / isText,见 files.py 的 _INLINE_MIME 与 ui.js 的判定家族):
@@ -43,19 +43,10 @@ window.Views = window.Views || {};
     },
   };
 
-  /** 服务端时间为 UTC naive(与 UI.fmtDate / fmtWhen 同口径):无时区后缀按 UTC 解析。 */
-  function parseWhen(s) {
-    if (!s) return null;
-    const str = String(s);
-    const hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(str);
-    const d = new Date(hasTz ? str : str.replace(' ', 'T') + 'Z');
-    return isNaN(d.getTime()) ? null : d;
-  }
-
   /** 相对时间(名称下的元信息行用):近处给"刚刚/N 分钟前/N 小时前/N 天前",
       超过一个月退回短日期。解析失败时退回 UI.fmtDate,不吞掉原始值。 */
   function relTime(s) {
-    const d = parseWhen(s);
+    const d = UI.parseDate(s);
     if (!d) return UI.fmtDate(s);
     const diff = Date.now() - d.getTime();
     if (diff < 60 * 1000) return '刚刚';

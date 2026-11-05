@@ -567,17 +567,14 @@
     pid = UI.idOf(pid);
     docId = UI.idOf(docId);
     if (!pid || !docId) return;
-    let list = [];
-    try { list = JSON.parse(localStorage.getItem(VIEWED_KEY) || '[]') || []; } catch (e) { list = []; }
+    let list = UI.pref.getJSON(VIEWED_KEY, []);
     list = list.filter((x) => !(x.projectId === pid && x.id === docId));
     list.unshift({ id: docId, projectId: pid, title: title || '文档', at: new Date().toISOString() });
-    try { localStorage.setItem(VIEWED_KEY, JSON.stringify(list.slice(0, 60))); } catch (e) { /* 配额满时放弃 */ }
+    UI.pref.setJSON(VIEWED_KEY, list.slice(0, 60));
   };
 
   App.viewed = function (pid) {
-    let list = [];
-    try { list = JSON.parse(localStorage.getItem(VIEWED_KEY) || '[]') || []; } catch (e) { list = []; }
-    return list.filter((x) => x.projectId === pid);
+    return UI.pref.getJSON(VIEWED_KEY, []).filter((x) => x.projectId === pid);
   };
 
   // ---------- 路由 ----------

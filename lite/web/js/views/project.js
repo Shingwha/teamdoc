@@ -267,8 +267,6 @@ window.SpaceSettings = (function () {
     { value: 20, label: '20 GB' },
   ];
   const GB = 1024 * 1024 * 1024;
-  // 角色强弱只用于"降级前确认":数字越小权限越低
-  const ROLE_RANK = { VIEWER: 1, EDITOR: 2, ADMIN: 3, OWNER: 4 };
   // 四种角色用不同色的现有徽标档位区分(不再只有 OWNER 有颜色)
   const ROLE_BADGE_KIND = { OWNER: 'primary', ADMIN: 'warning', EDITOR: 'success', VIEWER: '' };
 
@@ -278,12 +276,6 @@ window.SpaceSettings = (function () {
       kind: ROLE_BADGE_KIND[role] || '',
       cls: 'ss-role-badge',
     });
-  }
-
-  /** 成员次行的最后活跃:有值给日期;显式 null = 从未登录;字段缺失 = 未知。 */
-  function lastActiveText(value) {
-    if (value) return '最后活跃 ' + UI.fmtDateShort(value);
-    return value === null ? '从未活跃' : '最后活跃未知';
   }
 
   /**
@@ -438,7 +430,7 @@ window.SpaceSettings = (function () {
     function renderMembers() {
       const canAdmin = UI.canAdmin(proj);
       const canOwn = UI.canOwn(proj);
-      const ROLE_CHOICES = (canOwn ? ['OWNER'] : []).concat(['ADMIN', 'EDITOR', 'VIEWER']);
+      const ROLE_CHOICES = UI.ROLES.filter((role) => canOwn || role !== 'OWNER');
       let members = [];
       let filterRole = 'all';
       let query = '';
@@ -453,8 +445,7 @@ window.SpaceSettings = (function () {
         '<div id="ss-batch" class="ss-batch" hidden></div>' +
         '<div id="ss-members">' + UI.skeleton('rows', 4) + '</div>' +
         // 权限说明常驻抽屉底部:列表再长也不用先滚到底才能查角色含义
-        '<details class="ss-perms" style="position:sticky;bottom:0;z-index:1;' +
-          'background:var(--md-surface-container-high)">' +
+        '<details class="ss-perms">' +
         '<summary>权限说明</summary>' +
         '<div class="ss-perm-grid">' +
         '<div><b>VIEWER</b><span>查看文档、下载文件</span></div>' +
@@ -491,7 +482,7 @@ window.SpaceSettings = (function () {
       }
 
       function renderFilter() {
-        const roles = ['all'].concat(canOwn ? ['OWNER'] : []).concat(['ADMIN', 'EDITOR', 'VIEWER']);
+        const roles = ['all'].concat(ROLE_CHOICES);
         filterEl.innerHTML = roles.map((r) =>
           '<button type="button" class="chip' + (r === filterRole ? ' selected' : '') + '" data-role="' + r + '">' +
           (r === 'all' ? '全部' : ROLE_LABEL(r)) + '</button>').join('');
@@ -532,17 +523,15 @@ window.SpaceSettings = (function () {
           const checked = selected.has(m.userId) ? ' checked' : '';
           const roleCell = canAdmin
             ? '<select class="select ss-role" data-uid="' + UI.esc(m.userId) + '">' +
-              ROLE_CHOICES.map((rr) => '<option value="' + rr + '"' + (rr === m.role ? ' selected' : '') + '>' +
-                ROLE_LABEL(rr) + '</option>').join('') + '</select>'
+              UI.roleOptions(m.role, ROLE_CHOICES) + '</select>'
             : roleBadge(m.role);
           // 44px 定高(§6.7②):次行 = 邮箱 · 最后活跃,两行在 44px 内居中
-          return '<div class="list-row ss-member" data-uid="' + UI.esc(m.userId) + '"' +
-            ' style="height:44px;min-height:44px;padding-top:0;padding-bottom:0">' +
+          return '<div class="list-row ss-member" data-uid="' + UI.esc(m.userId) + '">' +
             (canAdmin ? '<input type="checkbox" class="sel-box ss-check" data-uid="' + UI.esc(m.userId) + '"' + checked + '>' : '') +
             UI.avatar({ name: u.name || u.email, seed: m.userId, color: u.avatarColor }) +
             '<div class="list-row-main"><div class="list-row-title">' + UI.esc(u.name || '-') +
             (u.isDisabled ? ' ' + UI.badge({ text: '已禁用', kind: 'danger' }) : '') + '</div>' +
-            '<div class="list-row-sub">' + UI.esc([u.email || '未设置邮箱', lastActiveText(m.lastActiveAt)].join(' · ')) + '</div></div>' +
+            '<div class="list-row-sub">' + UI.esc([u.email || '未设置邮箱', UI.lastActiveText(m.lastActiveAt)].join(' · ')) + '</div></div>' +
             '<div class="list-row-acts">' + roleCell +
             (canAdmin ? UI.iconBtn({ icon: 'user-unfollow-line', title: '移除成员', danger: true, cls: 'ss-remove' }) : '') +
             '</div></div>';
@@ -555,9 +544,7 @@ window.SpaceSettings = (function () {
         batchEl.hidden = selected.size === 0;
         if (!selected.size) return;
         batchEl.innerHTML = '<span class="batch-info">已选 ' + selected.size + ' 人</span>' +
-          '<select class="select" id="ss-batch-role">' +
-          ROLE_CHOICES.map((r) => '<option value="' + r + '">' + ROLE_LABEL(r) + '</option>').join('') +
-          '</select>' + UI.btn({ id: 'ss-batch-apply', label: '批量改角色', kind: 'tonal', size: 'sm' }) +
+          '<select class="select" id="ss-batch-role">' + UI.roleOptions('', ROLE_CHOICES) + '</select>' + UI.btn({ id: 'ss-batch-apply', label: '批量改角色', kind: 'tonal', size: 'sm' }) +
           UI.btn({ id: 'ss-batch-remove', label: '批量移出', kind: 'danger-outline', size: 'sm' });
       }
 
@@ -576,7 +563,7 @@ window.SpaceSettings = (function () {
         const nextRole = sel.value;
         // 降级是权限收缩,先确认;取消则把下拉恢复到原值(控件状态与数据保持一致)
         if (prevRole && nextRole !== prevRole &&
-            (ROLE_RANK[nextRole] || 0) < (ROLE_RANK[prevRole] || 0)) {
+            UI.roleRank(nextRole) < UI.roleRank(prevRole)) {
           const name = (member.user && (member.user.name || member.user.email)) || '该成员';
           const ok = await UI.confirmDialog(
             '将「' + name + '」从 ' + ROLE_LABEL(prevRole) + ' 降级为 ' + ROLE_LABEL(nextRole) +
@@ -617,7 +604,7 @@ window.SpaceSettings = (function () {
           // 批量降级与单行降级同口径:先确认权限收缩
           const downgrades = ids.filter((uid) => {
             const m = members.find((x) => x.userId === uid);
-            return m && (ROLE_RANK[role] || 0) < (ROLE_RANK[m.role] || 0);
+            return m && UI.roleRank(role) < UI.roleRank(m.role);
           });
           if (downgrades.length && !(await UI.confirmDialog(
             '将把 ' + downgrades.length + ' 名成员降级为 ' + ROLE_LABEL(role) +
