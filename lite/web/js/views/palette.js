@@ -11,8 +11,17 @@ window.Palette = (function () {
   let active = 0;
   let seq = 0;         // 异步查询序号:只渲染最后一次
   let adminUsers = null;
+  let archivedBox = null; // 无当前空间时的「包含归档」开关
+
+  const ARCHIVED_PREF = 'td:search-archived';
 
   function currentPid() { return App.currentSpaceId(); }
+  // 搜索只有"显式空间路由"才限定范围；#/ 等页面即使记忆了空间也做全局搜索。
+  function searchPid() {
+    const cur = Route.current();
+    return cur && cur.pid ? cur.pid : null;
+  }
+  function archivedEnabled() { return UI.pref.get(ARCHIVED_PREF, '0') === '1'; }
 
   function close() {
     if (!mask) return;
@@ -20,11 +29,14 @@ window.Palette = (function () {
     mask = null;
     input = null;
     listEl = null;
+    archivedBox = null;
     rows = [];
   }
 
   function open() {
     if (mask) { input.focus(); input.select(); return; }
+    // 当前空间内搜索天然只查该空间；只有全局搜索才需要归档开关。
+    const showArchived = !searchPid();
     mask = document.createElement('div');
     mask.className = 'cmd-mask';
     mask.innerHTML =
@@ -33,16 +45,30 @@ window.Palette = (function () {
       '<input id="cmd-q" class="cmd-input" type="text" placeholder="搜索文档、文件,或输入命令" autocomplete="off">' +
       '<kbd>Esc</kbd></div>' +
       '<div id="cmd-list" class="cmd-list"></div>' +
-      '<div class="cmd-foot"><span>↑↓ 选择</span><span>Enter 打开</span><span>Esc 关闭</span></div>' +
+      '<div class="cmd-foot">' +
+      (showArchived ? '<label class="check-row"><input type="checkbox" id="cmd-archived"' +
+        (archivedEnabled() ? ' checked' : '') + '>包含归档</label>' : '') +
+      '<span>↑↓ 选择</span><span>Enter 打开</span><span>Esc 关闭</span></div>' +
       '</div>';
     document.body.appendChild(mask);
     input = mask.querySelector('#cmd-q');
     listEl = mask.querySelector('#cmd-list');
+    archivedBox = mask.querySelector('#cmd-archived');
+    if (archivedBox) archivedBox.addEventListener('change', onArchivedToggle);
     mask.addEventListener('pointerdown', (e) => { if (e.target === mask) close(); });
     input.addEventListener('input', () => query(input.value.trim()));
     input.addEventListener('keydown', onKey);
     input.focus();
     query('');
+  }
+
+  function onArchivedToggle() {
+    UI.pref.set(ARCHIVED_PREF, archivedBox && archivedBox.checked ? '1' : '0');
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    query(input.value.trim());
+    input.focus();
+    try { input.setSelectionRange(start, end); } catch (e) { /* 非文本输入忽略 */ }
   }
 
   function onKey(e) {
@@ -125,11 +151,12 @@ window.Palette = (function () {
     const actions = actionRows(q);
     render(actions, [], [], q, null, true);
 
-    const pid = currentPid();
+    const pid = searchPid();
     try {
       const params = { limit: 8 };
       if (q) params.q = q;
       if (pid) params.projectId = pid;
+      else if (archivedEnabled()) params.includeArchived = 1;
       const res = await api(Endpoints.search(q ? Object.assign({}, params, { type: 'all' }) : params)) || {};
       if (mySeq !== seq || !mask) return;
       let docs = res.docs || [];
@@ -161,7 +188,9 @@ window.Palette = (function () {
         UI.icon(r.icon || 'arrow-right-line', 'cmd-row-icon') +
         '<span class="cmd-row-main"><span class="cmd-row-label">' + UI.esc(r.label) + '</span>' +
         (r.sub ? '<span class="cmd-row-sub">' + r.sub + '</span>' : '') + '</span>' +
-        (r.kind ? UI.badge({ text: r.kind, cls: 'xs' }) : '') + '</button>';
+        (r.kind ? UI.badge({ text: r.kind, cls: 'xs' }) : '') +
+        (r.archived ? UI.badge({ text: '已归档', kind: 'warning', cls: 'xs' }) : '') +
+        '</button>';
     }
 
     const filteredActions = actions;
@@ -170,7 +199,7 @@ window.Palette = (function () {
     if (docs.length) {
       group('文档');
       docs.forEach((d) => row({
-        icon: 'file-text-line', kind: '文档', label: d.title,
+        icon: 'file-text-line', kind: '文档', label: d.title, archived: !!d.archived,
         sub: UI.esc(d.projectName ? d.projectName + ' · ' + UI.fmtDate(d.updatedAt) : UI.fmtDate(d.updatedAt)),
         run: () => { location.hash = App.route.project(d.projectId, 'docs', d.id); },
       }));
@@ -178,7 +207,7 @@ window.Palette = (function () {
     if (files.length) {
       group('文件');
       files.forEach((f) => row({
-        icon: UI.fileIcon(f.mime).icon, kind: '文件', label: f.name,
+        icon: UI.fileIcon(f.mime).icon, kind: '文件', label: f.name, archived: !!f.archived,
         sub: UI.esc((f.projectName || '') + ' · ' + UI.fmtSize(f.size)),
         run: () => {
           location.hash = App.route.project(f.projectId, 'files', null,
