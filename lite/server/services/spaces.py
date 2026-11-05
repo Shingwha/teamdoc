@@ -8,7 +8,7 @@ from errors import (CONFLICT, FORBIDDEN, NOT_FOUND, SPACE_ARCHIVED, VALIDATION,
 from http_util import bool_field, color_field, id_field, quota_field, str_field
 from models import (Doc, DocVersion, File, FileChange, FileVersion, Folder,
                     Project, ProjectMember, User)
-from security.context import (AuthContext, ensure_space_mutable, get_project_or_404,
+from security.context import (Actor, ensure_space_mutable, get_project_or_404,
                               is_project_owner_or_admin,
                               project_role_and_membership)
 from serialize import iso
@@ -121,7 +121,7 @@ def _create_membership(db: DbSession, project_id: str, user: User, role: str,
     return row
 
 
-def discover_projects(db: DbSession, ctx: AuthContext) -> list:
+def discover_projects(db: DbSession, ctx: Actor) -> list:
     rows = db.query(Project).filter(Project.visibility == "public",
                                     Project.is_personal.is_(False),
                                     Project.archived_at.is_(None)).all()
@@ -161,7 +161,7 @@ def _invites(db: DbSession, payload: dict) -> list[tuple[User, str]]:
     return out
 
 
-def create_project(db: DbSession, payload: dict, ctx: AuthContext) -> dict:
+def create_project(db: DbSession, payload: dict, ctx: Actor) -> dict:
     name = str_field(payload, "name", 100, required=True)
     description = str_field(payload, "description", 5000)
     color = color_field(payload, "color") if "color" in payload else None
@@ -182,7 +182,7 @@ def create_project(db: DbSession, payload: dict, ctx: AuthContext) -> dict:
 
 
 def list_projects(db: DbSession, all_flag: str, archived_flag: str,
-                  ctx: AuthContext) -> list:
+                  ctx: Actor) -> list:
     ids = visible_project_ids(db, ctx.user, site_wide=all_flag == "1" and ctx.user.is_admin)
     if not ids:
         return []
@@ -197,12 +197,12 @@ def list_projects(db: DbSession, all_flag: str, archived_flag: str,
     return [project_json(db, p, ctx.user, stats.get(p.id)) for p in rows]
 
 
-def get_project(db: DbSession, project_id: str, ctx: AuthContext) -> dict:
+def get_project(db: DbSession, project_id: str, ctx: Actor) -> dict:
     return project_json(db, get_project_or_404(db, project_id), ctx.user)
 
 
 def patch_project(db: DbSession, project_id: str, payload: dict,
-                  ctx: AuthContext) -> dict:
+                  ctx: Actor) -> dict:
     p = get_project_or_404(db, project_id)
     archived_flag = None
     if "archived" in payload:
@@ -240,7 +240,7 @@ def patch_project(db: DbSession, project_id: str, payload: dict,
 
 
 def transfer_project(db: DbSession, project_id: str, payload: dict,
-                     ctx: AuthContext) -> dict:
+                     ctx: Actor) -> dict:
     """原子转让：目标升 OWNER、原 OWNER 降 ADMIN，同一事务提交。"""
     p = get_project_or_404(db, project_id)
     if p.is_personal:
@@ -277,7 +277,7 @@ def transfer_project(db: DbSession, project_id: str, payload: dict,
     return project_json(db, p, ctx.user)
 
 
-def delete_project(db: DbSession, project_id: str, ctx: AuthContext) -> dict:
+def delete_project(db: DbSession, project_id: str, ctx: Actor) -> dict:
     p = get_project_or_404(db, project_id)
     if p.is_personal:
         err(403, FORBIDDEN, "个人空间不可删除")
@@ -312,7 +312,7 @@ def list_members(db: DbSession, project_id: str) -> list:
             for m, u in rows]
 
 
-def add_member(db: DbSession, project_id: str, payload: dict, ctx: AuthContext) -> dict:
+def add_member(db: DbSession, project_id: str, payload: dict, ctx: Actor) -> dict:
     p = get_project_or_404(db, project_id)
     _require_manageable(p)
     user_id = id_field(payload, "userId", required=True)
@@ -331,7 +331,7 @@ def add_member(db: DbSession, project_id: str, payload: dict, ctx: AuthContext) 
 
 
 def patch_member(db: DbSession, project_id: str, user_id: str, payload: dict,
-                 ctx: AuthContext) -> dict:
+                 ctx: Actor) -> dict:
     p = get_project_or_404(db, project_id)
     _require_manageable(p)
     m = db.query(ProjectMember).filter_by(project_id=project_id, user_id=user_id).first()
@@ -367,7 +367,7 @@ def remove_member(db: DbSession, project_id: str, user_id: str) -> dict:
     return {"ok": True}
 
 
-def join_project(db: DbSession, project_id: str, ctx: AuthContext) -> dict:
+def join_project(db: DbSession, project_id: str, ctx: Actor) -> dict:
     p = get_project_or_404(db, project_id)
     if p.visibility != "public":
         err(403, FORBIDDEN, "该项目未公开,无法自助加入")
@@ -376,7 +376,7 @@ def join_project(db: DbSession, project_id: str, ctx: AuthContext) -> dict:
     return project_json(db, p, ctx.user)
 
 
-def leave_project(db: DbSession, project_id: str, ctx: AuthContext) -> dict:
+def leave_project(db: DbSession, project_id: str, ctx: Actor) -> dict:
     p = get_project_or_404(db, project_id)
     if p.is_personal:
         err(403, FORBIDDEN, "个人空间不可退出")

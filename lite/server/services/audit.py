@@ -1,5 +1,4 @@
 """管理端存储、孤儿、项目总览与登录审计服务。"""
-import hashlib
 import os
 import threading
 from datetime import datetime
@@ -13,10 +12,10 @@ import throttle
 import watchdog
 from db import engine, release_db, utcnow
 from errors import NOT_FOUND, VALIDATION, err
-from models import (AuthSession, Doc, DocVersion, File, FileVersion, Folder,
+from models import (AuthSession, Doc, DocVersion, FileVersion, Folder,
                     LoginEvent, Project, ProjectMember, ThrottleState, User)
 from security import sessions
-from serialize import describe_ua, iso, session_json, user_json
+from serialize import describe_ua, iso, session_json, session_ref, user_json
 from serialize import project_json as project_shape
 from services import backup
 from services.files import file_storage_totals
@@ -196,7 +195,7 @@ def user_access(db: DbSession, user_id: str, current_token: str | None) -> dict:
 
 def revoke_session(db: DbSession, ref: str) -> dict:
     for sess in db.query(AuthSession).all():
-        if hashlib.sha256(sess.token.encode("utf-8")).hexdigest() == ref:
+        if session_ref(sess.token) == ref:
             db.delete(sess)
             db.commit()
             return {"ok": True, "revoked": 1}

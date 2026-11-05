@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session as DbSession
 from errors import bad_request
 from http_util import query_id
 from models import Doc, File, Project
-from security.context import AuthContext
+from security.context import Actor
 from serialize import file_json, iso
 from services.spaces import visible_project_ids
 from services.users import user_names
@@ -34,7 +34,7 @@ def _file_row(f: File, project_name: str) -> dict:
             "projectName": project_name}
 
 
-def search(db: DbSession, ctx: AuthContext, q: str, type: str, limit: int,
+def search(db: DbSession, ctx: Actor, q: str, type: str, limit: int,
            *, project_id: str = "", updated_by: str = "") -> dict:
     q = (q or "").strip()
     if type not in TYPES:

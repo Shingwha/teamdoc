@@ -1,18 +1,16 @@
-"""会话签发、PAT 秘密散列、登录节流与独立安全审计。"""
+"""会话签发、PAT 秘密散列、登录节流与独立安全审计（不依赖 FastAPI）。"""
 import hashlib
 import logging
 import secrets
 import time
 from datetime import timedelta
 
-from fastapi import Request, Response
 from sqlalchemy.orm import Session as DbSession
 
 import config
 import throttle
 from db import utcnow
 from errors import TOO_MANY_ATTEMPTS, err
-from http_util import client_ip, client_ua
 from models import AuthSession, LoginEvent, Pat, User
 from security.passwords import dummy_hash, verify_password
 
@@ -48,6 +46,7 @@ def pat_hash(token: str) -> str:
 
 def create_session(db: DbSession, user_id: str, ttl: int = SESSION_TTL, *,
                    ip: str = "", ua: str = "") -> str:
+    """签发会话并独立提交：认证凭据的生命周期不等同于业务写事务。"""
     token = secrets.token_hex(32)
     now = utcnow()
     db.add(AuthSession(token=token, user_id=user_id, created_at=now,
@@ -55,11 +54,6 @@ def create_session(db: DbSession, user_id: str, ttl: int = SESSION_TTL, *,
                        ip=ip or None, user_agent=ua or None, last_seen_at=now))
     db.commit()
     return token
-
-
-def set_session_cookie(response: Response, token: str, max_age: int = SESSION_TTL):
-    response.set_cookie(SESSION_COOKIE, token, max_age=max_age,
-                        httponly=True, samesite="lax", path="/")
 
 
 def record_login_event(db: DbSession, *, user: User | None, email: str, ip: str,
@@ -88,11 +82,10 @@ def _throttle_subject(policy: throttle.Policy, ident: str, ip: str) -> str:
     return ip if policy.subject == "client_ip" else ident
 
 
-def verify_credentials(request: Request, db: DbSession, *, ident: str, password: str,
-                       user: User | None,
+def verify_credentials(db: DbSession, *, ident: str, password: str,
+                       user: User | None, ip: str = "", ua: str = "",
                        policies: tuple[throttle.Policy, ...] = LOGIN_POLICIES) -> bool:
     """冷却检查、恒定耗时校验、失败计数与登录审计的唯一入口。"""
-    ip, ua = client_ip(request), client_ua(request)
     for p in policies:
         lock = throttle.locked(db, p, _throttle_subject(p, ident, ip))
         if lock:

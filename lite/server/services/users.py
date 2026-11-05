@@ -324,8 +324,8 @@ def list_pats(db: DbSession, user: User) -> list[dict]:
     rows = (db.query(Pat).filter_by(user_id=user.id)
             .filter(Pat.revoked_at.is_(None)).order_by(Pat.created_at.desc()).all())
     return [{"id": p.id, "name": p.name, "scopes": p.scopes,
-             "lastUsedAt": p.last_used_at.isoformat() if p.last_used_at else None,
-             "createdAt": p.created_at.isoformat()} for p in rows]
+             "lastUsedAt": iso(p.last_used_at),
+             "createdAt": iso(p.created_at)} for p in rows]
 
 
 def create_pat(db: DbSession, ctx, payload: dict) -> dict:
@@ -340,7 +340,7 @@ def create_pat(db: DbSession, ctx, payload: dict) -> dict:
     db.add(pat)
     db.commit()
     return {"id": pat.id, "name": pat.name, "scopes": pat.scopes, "token": token,
-            "createdAt": pat.created_at.isoformat()}
+            "createdAt": iso(pat.created_at)}
 
 
 def revoke_pat(db: DbSession, ctx, pat_id: str) -> dict:

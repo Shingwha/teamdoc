@@ -1,16 +1,13 @@
-"""SQLite 引擎、请求会话与时间/可见性基础函数。"""
-import logging
-import time
+"""SQLite 引擎、会话工厂与时间/可见性基础函数（不依赖 FastAPI）。"""
 from datetime import datetime
 
-from fastapi import Request
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 from storage import DB_PATH
 
-logger = logging.getLogger("teamdoc.db")
+# 请求会话持有时间超过该阈值时记录告警；读取在 deps.get_db。
 DB_WARN_SECONDS = 2.0
 
 # SQLite 单写者下连接廉价；NullPool 避免慢上传/下载拖住全站连接队列。
@@ -31,20 +28,6 @@ def _set_pragmas(dbapi_conn, _):
 
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
-
-
-def get_db(request: Request):
-    """请求级会话；长 I/O 前必须调用 release_db。"""
-    db = SessionLocal()
-    started = time.monotonic()
-    try:
-        yield db
-    finally:
-        db.close()
-        held = time.monotonic() - started
-        if held > DB_WARN_SECONDS:
-            logger.warning("数据库会话持有 %.1fs:%s %s", held,
-                           request.method, request.url.path)
 
 
 def release_db(db) -> None:

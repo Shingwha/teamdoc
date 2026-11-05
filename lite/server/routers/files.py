@@ -5,13 +5,13 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session as DbSession
 
-from db import get_db, release_db
+from db import release_db
+from deps import (IdPath, current_user, declared_bytes, get_db, pat_write_guard,
+                  require_project_role, require_role)
 from http_util import clamp_int
-from ids import IdPath
 from media import can_inline, guess_mime
 from models import File, Folder
-from security.context import (AuthContext, current_user, load_live, pat_write_guard,
-                              require_project_role, require_role)
+from security.context import Actor, load_live
 from serialize import file_json
 from services import files, versions
 
@@ -19,13 +19,6 @@ router = APIRouter(dependencies=[Depends(pat_write_guard)])
 FILE_VIEW = require_role(File, "文件", "VIEWER", path_param="file_id")
 FILE_EDIT = require_role(File, "文件", "EDITOR", path_param="file_id", write=True)
 FOLDER_EDIT = require_role(Folder, "文件夹", "EDITOR", path_param="folder_id", write=True)
-
-
-def _declared_bytes(request: Request) -> int:
-    try:
-        return int(request.headers.get("content-length") or 0)
-    except ValueError:
-        return 0
 
 
 def _file_response(db: DbSession, name: str, path, inline: str):
@@ -45,19 +38,19 @@ def _file_response(db: DbSession, name: str, path, inline: str):
 @router.get("/api/files")
 def list_files(project_id: str = "", folder_id: str = "", offset: int = 0,
                limit: int = 100, sort: str = "name", dir: str = "asc",
-               ctx: AuthContext = Depends(current_user), db: DbSession = Depends(get_db)):
+               ctx: Actor = Depends(current_user), db: DbSession = Depends(get_db)):
     return files.list_files(db, ctx, project_id, folder_id, offset, limit, sort, dir)
 
 
 @router.get("/api/projects/{project_id}/storage")
 def project_storage(project_id: IdPath,
-                    ctx: AuthContext = Depends(require_project_role("VIEWER")),
+                    ctx: Actor = Depends(require_project_role("VIEWER")),
                     db: DbSession = Depends(get_db)):
     return files.project_storage(db, project_id)
 
 
 @router.post("/api/files/folders")
-def create_folder(payload: dict, ctx: AuthContext = Depends(current_user),
+def create_folder(payload: dict, ctx: Actor = Depends(current_user),
                   db: DbSession = Depends(get_db)):
     return files.create_folder(db, payload, ctx)
 
@@ -75,26 +68,26 @@ def move_folder(payload: dict, dep=Depends(FOLDER_EDIT), db: DbSession = Depends
 @router.post("/api/files/upload")
 async def upload_file(request: Request, projectId: str = "", folderId: str = "",
                       docId: str = "", name: str = "", name_mode: str = "",
-                      version_of: str = "", ctx: AuthContext = Depends(current_user),
+                      version_of: str = "", ctx: Actor = Depends(current_user),
                       db: DbSession = Depends(get_db)):
     plan = files.prepare_upload(db, ctx, project_id=projectId, folder_id=folderId,
                                 doc_id=docId, name=name, name_mode=name_mode,
                                 version_of=version_of)
     f = await files.store_upload(db, ctx, plan, request.stream(),
-                                 _declared_bytes(request))
+                                 declared_bytes(request))
     return file_json(f)
 
 
 @router.get("/api/projects/{project_id}/folders/tree")
 def folder_tree(project_id: IdPath,
-                ctx: AuthContext = Depends(require_project_role("VIEWER")),
+                ctx: Actor = Depends(require_project_role("VIEWER")),
                 db: DbSession = Depends(get_db)):
     return files.folder_tree(db, project_id)
 
 
 @router.get("/api/projects/{project_id}/file-changes")
 def file_changes(project_id: IdPath, since: int = 0, limit: int = 200,
-                 ctx: AuthContext = Depends(require_project_role("VIEWER")),
+                 ctx: Actor = Depends(require_project_role("VIEWER")),
                  db: DbSession = Depends(get_db)):
     limit = clamp_int(limit, 1, 500, "limit")
     return versions.list_changes(db, project_id, since, limit)
@@ -102,7 +95,7 @@ def file_changes(project_id: IdPath, since: int = 0, limit: int = 200,
 
 @router.get("/api/files/zip")
 def zip_files(ids: str = "", folderIds: str = "",
-              ctx: AuthContext = Depends(current_user), db: DbSession = Depends(get_db)):
+              ctx: Actor = Depends(current_user), db: DbSession = Depends(get_db)):
     (spool, total), _declared = files.prepare_zip(db, ctx, ids, folderIds)
 
     def gen():
@@ -119,11 +112,11 @@ def zip_files(ids: str = "", folderIds: str = "",
 
 @router.post("/api/files/{file_id}/versions")
 async def upload_version(file_id: IdPath, request: Request, name: str = "",
-                         note: str = "", ctx: AuthContext = Depends(current_user),
+                         note: str = "", ctx: Actor = Depends(current_user),
                          db: DbSession = Depends(get_db)):
     plan = files.prepare_upload(db, ctx, name=name, version_of=file_id, note=note)
     f = await files.store_upload(db, ctx, plan, request.stream(),
-                                 _declared_bytes(request))
+                                 declared_bytes(request))
     return file_json(f)
 
 
@@ -139,7 +132,7 @@ def move_file(payload: dict, dep=Depends(FILE_EDIT), db: DbSession = Depends(get
 
 @router.get("/api/files/{file_id}/download")
 def download_file(file_id: IdPath, inline: str = "", version: int | None = None,
-                  ctx: AuthContext = Depends(current_user), db: DbSession = Depends(get_db)):
+                  ctx: Actor = Depends(current_user), db: DbSession = Depends(get_db)):
     f = load_live(db, File, file_id, "文件")
     files.ensure_file_access(db, ctx, f)
     name, path = files.download_source(db, f, version)
@@ -164,7 +157,7 @@ def unshare_file(dep=Depends(FILE_EDIT), db: DbSession = Depends(get_db)):
 
 
 @router.get("/api/files/{file_id}/meta")
-def file_meta(file_id: IdPath, ctx: AuthContext = Depends(current_user),
+def file_meta(file_id: IdPath, ctx: Actor = Depends(current_user),
               db: DbSession = Depends(get_db)):
     f = load_live(db, File, file_id, "文件")
     files.ensure_file_access(db, ctx, f)
@@ -173,7 +166,7 @@ def file_meta(file_id: IdPath, ctx: AuthContext = Depends(current_user),
 
 @router.get("/api/files/{file_id}")
 def file_detail(file_id: IdPath, version: int | None = None,
-                ctx: AuthContext = Depends(current_user), db: DbSession = Depends(get_db)):
+                ctx: Actor = Depends(current_user), db: DbSession = Depends(get_db)):
     f = load_live(db, File, file_id, "文件")
     files.ensure_file_access(db, ctx, f)
     return files.file_meta(db, f, version)

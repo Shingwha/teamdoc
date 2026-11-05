@@ -12,14 +12,14 @@ from sqlalchemy.orm import Session as DbSession
 import config
 from db import release_db, utcnow
 from errors import CONFLICT, NAME_EXISTS, NOT_FOUND, VALIDATION, bad_request, err
-from http_util import id_csv_field, opt_int, query_id, str_field
-from models import Doc, File, FileChange, FileVersion, Folder
-from security.context import (AuthContext, ensure_move_allowed, ensure_project_role,
+from http_util import id_csv_field, id_field, opt_id, opt_int, query_id, str_field
+from models import Doc, File, FileVersion, Folder
+from security.context import (Actor, ensure_move_allowed, ensure_project_role,
                               get_project_or_404, load_live, validate_parent)
 from serialize import file_json, folder_json, historical_file_json, iso
 from services import refs, versions
-from services.users import user_map
-from storage import (FILES_DIR, INFLIGHT_STORAGE, disk_free_bytes, disk_total_bytes,
+from services.users import user_map, user_names
+from storage import (INFLIGHT_STORAGE, disk_free_bytes, disk_total_bytes,
                      file_abspath, unlink_quiet)
 from treeutil import build_tree, collect_subtree, location_json
 
@@ -37,11 +37,11 @@ ZIP_MAX_FOLDERS = 200
 ZIP_MAX_BYTES = config.ZIP_MAX_MB * 1024 * 1024
 
 
-def ensure_file_access(db: DbSession, ctx: AuthContext, f: File):
+def ensure_file_access(db: DbSession, ctx: Actor, f: File):
     ensure_project_role(db, ctx, f.project_id, "VIEWER")
 
 
-def list_files(db: DbSession, ctx: AuthContext, project_id: str, folder_id: str,
+def list_files(db: DbSession, ctx: Actor, project_id: str, folder_id: str,
                offset: int, limit: int, sort: str, direction: str) -> dict:
     project_id = query_id(project_id, "project_id", required=True)
     folder_id = query_id(folder_id, "folderId")
@@ -138,10 +138,7 @@ def _user_name_conflict(existing: set, existing_dirs: set, name: str, kind: str)
 
 
 def _name_exists(db: DbSession, existing: File):
-    updated_by_name = ""
-    if existing.updated_by:
-        author = user_map(db, [existing.updated_by]).get(existing.updated_by)
-        updated_by_name = author.name if author else ""
+    updated_by_name = user_names(db, [existing.updated_by]).get(existing.updated_by, "")
     err(409, NAME_EXISTS, f"同目录下已有同名文件「{existing.name}」",
         extra={"existing": {"id": existing.id, "name": existing.name,
                             "size": existing.size, "updatedAt": iso(existing.updated_at),
@@ -160,9 +157,8 @@ def _attach_folder(db: DbSession, project_id: str) -> str:
     return folder.id
 
 
-def create_folder(db: DbSession, payload: dict, ctx: AuthContext) -> dict:
+def create_folder(db: DbSession, payload: dict, ctx: Actor) -> dict:
     name = str_field(payload, "name", 100, required=True)
-    from http_util import id_field, opt_id
     project_id = id_field(payload, "projectId", required=True)
     parent_id = opt_id(payload.get("parentId"))
     get_project_or_404(db, project_id)
@@ -188,8 +184,7 @@ def rename_folder(db: DbSession, folder: Folder, payload: dict) -> dict:
     return folder_json(folder)
 
 
-def move_folder(db: DbSession, folder: Folder, payload: dict, ctx: AuthContext) -> dict:
-    from http_util import id_field, opt_id
+def move_folder(db: DbSession, folder: Folder, payload: dict, ctx: Actor) -> dict:
     target_id = id_field(payload, "projectId", required=True)
     src_id = folder.project_id
     ensure_move_allowed(db, ctx, src_id, target_id)
@@ -201,7 +196,7 @@ def move_folder(db: DbSession, folder: Folder, payload: dict, ctx: AuthContext) 
     if target_id != src_id:
         now = utcnow()
         for f in affected:
-            db.add(FileChange(file_id=f.id, space_id=src_id, op="delete", at=now))
+            versions.record_change(db, f, "delete", at=now, space_id=src_id)
         folder.project_id = target_id
         db.query(Folder).filter(Folder.id.in_(ids)).update(
             {"project_id": target_id}, synchronize_session=False)
@@ -273,7 +268,7 @@ class UploadPlan:
     note: str | None = None
 
 
-def prepare_upload(db: DbSession, ctx: AuthContext, *, project_id: str = "",
+def prepare_upload(db: DbSession, ctx: Actor, *, project_id: str = "",
                    folder_id: str = "", doc_id: str = "", name: str = "",
                    name_mode: str = "", version_of: str = "",
                    note: str = "") -> UploadPlan:
@@ -319,7 +314,7 @@ def prepare_upload(db: DbSession, ctx: AuthContext, *, project_id: str = "",
                       doc_id=doc_id or None)
 
 
-async def store_upload(db: DbSession, ctx: AuthContext, plan: UploadPlan, stream,
+async def store_upload(db: DbSession, ctx: Actor, plan: UploadPlan, stream,
                        declared_bytes: int = 0) -> File:
     """关闭会话流式写盘，最终事务重验并登记当前版本与 file_changes。"""
     if declared_bytes:
@@ -394,8 +389,7 @@ def folder_tree(db: DbSession, project_id: str) -> list:
     return build_tree(folders, lambda f: folder_json(f, face="tree"))
 
 
-def move_file(db: DbSession, f: File, payload: dict, ctx: AuthContext) -> dict:
-    from http_util import id_field, opt_id
+def move_file(db: DbSession, f: File, payload: dict, ctx: Actor) -> dict:
     target_id = id_field(payload, "projectId", required=True)
     folder_id = opt_id(payload.get("folderId"))
     src_id = f.project_id
@@ -403,7 +397,7 @@ def move_file(db: DbSession, f: File, payload: dict, ctx: AuthContext) -> dict:
     validate_parent(db, Folder, folder_id, target_id, label="目标文件夹")
     now = utcnow()
     if target_id != src_id:
-        db.add(FileChange(file_id=f.id, space_id=src_id, op="delete", at=now))
+        versions.record_change(db, f, "delete", at=now, space_id=src_id)
     f.project_id = target_id
     f.folder_id = folder_id
     f.updated_by = ctx.user.id
@@ -455,7 +449,7 @@ def file_meta(db: DbSession, f: File, number: int | None = None) -> dict:
                      location=location_json(db, f.project_id, Folder, f.folder_id, "name"))
 
 
-def rename_file(db: DbSession, f: File, payload: dict, ctx: AuthContext) -> dict:
+def rename_file(db: DbSession, f: File, payload: dict, ctx: Actor) -> dict:
     if "name" in payload:
         name = str_field(payload, "name", 255, required=True)
         if name != f.name:
@@ -496,7 +490,7 @@ def file_storage_totals(db: DbSession, project_id: str | None = None) -> dict:
     return {"active": (active[0] or 0, active[1]), "trash": (trash[0] or 0, trash[1])}
 
 
-def _collect_zip_targets(db: DbSession, ctx: AuthContext, file_ids: list[str],
+def _collect_zip_targets(db: DbSession, ctx: Actor, file_ids: list[str],
                          folder_ids: list[str]) -> list[tuple[str, File]]:
     wanted: list[tuple[str, File]] = []
     for f in db.query(File).filter(File.id.in_(file_ids), File.deleted_at.is_(None)).all():
@@ -527,7 +521,7 @@ def _collect_zip_targets(db: DbSession, ctx: AuthContext, file_ids: list[str],
     return wanted
 
 
-def prepare_zip(db: DbSession, ctx: AuthContext, ids: str, folder_ids: str) -> tuple[list, int]:
+def prepare_zip(db: DbSession, ctx: Actor, ids: str, folder_ids: str) -> tuple[list, int]:
     file_ids = id_csv_field(ids, "ids")
     folder_id_list = id_csv_field(folder_ids, "folderIds")
     if not file_ids and not folder_id_list:
