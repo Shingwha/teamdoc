@@ -77,13 +77,18 @@ def temp_page(name, inject):
             page.unlink()
 
 
-def dump_page(chrome, base_url, page_name, query="", budget=12000):
-    """跑一次无头 Chrome 并取回 DOM 文本。"""
+def dump_page(chrome, base_url, page_name, query="", budget=12000, window_size=None):
+    """跑一次无头 Chrome 并取回 DOM 文本。
+
+    window_size 形如 "1280,900";缺省用 headless 的 800×600(形态断点 <960 生效)。
+    需要宽屏形态(网格/内联侧栏)的用例显式传入。
+    无头模式用 `--headless=new`:旧无头在有普通 Chrome 进程运行时会吞掉 URL。"""
     url = f"{base_url}/{page_name}" + (f"?{query}" if query else "")
-    proc = subprocess.run(
-        [chrome, "--headless", "--disable-gpu", "--no-sandbox",
-         f"--virtual-time-budget={budget}", "--dump-dom", url],
-        capture_output=True, timeout=300)
+    args = [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
+            f"--virtual-time-budget={budget}", "--dump-dom", url]
+    if window_size:
+        args.insert(1, f"--window-size={window_size}")
+    proc = subprocess.run(args, capture_output=True, timeout=300)
     return proc.stdout.decode("utf-8", "replace")
 
 

@@ -1,5 +1,7 @@
 // ui.js — 自研组件库与通用工具(全部视图复用,禁止重复造轮子)
-// 工具:esc / debounce / fmtSize / fmtDate / copyText / roleRank / roleLabel / icon
+// 工具:esc / debounce / parseDate / fmtSize / fmtDate / fmtDateShort / fmtWhen /
+//       lastActiveText / copyText / roleRank / roleLabel / ROLES / roleOptions /
+//       pref(get/set/getJSON/setJSON) / idOf / icon
 // 浮层:toast / err / modal / confirmDialog / inputDialog / formModal / dropdownMenu
 // 展示:avatar / spinner / loadingRow / emptyState / badge / banner / card / idText
 // 布局:pageHead / toolbar / seg / listRow / tableHead / tableRow / btn / iconBtn /
@@ -41,7 +43,7 @@ window.UI = (function () {
   }
 
 
-  /** 按 mime 给出文件类型图标与配色类(全站唯一来源:云空间/搜索/最近文件共用)。
+  /** 按 mime 给出文件类型图标与配色类(全站唯一来源:云空间/命令面板/最近文件共用)。
    *  配色类 .fi-* 定义在 components.css,取 --file-* 固定色(主题无关,深色下不变) */
   function fileIcon(mime) {
     mime = mime || '';
@@ -94,6 +96,13 @@ window.UI = (function () {
       p(d.getHours()) + ':' + p(d.getMinutes());
   }
 
+  /** 最后活跃文案:有值给日期;显式 null = 从未登录;字段缺失 = 未知。
+      成员列表与用户详情的「所属空间」共用这一份判定。 */
+  function lastActiveText(value) {
+    if (value) return '最后活跃 ' + fmtDateShort(value);
+    return value === null ? '从未活跃' : '最后活跃未知';
+  }
+
   /** 自适应时间:今天 10:09 / 昨天 18:03 / 9/11 14:20 / 2025-12-03 09:15。
       给"按时间找东西"的列表用(版本历史):近期的记录只关心几点几分,远期才需要完整日期。
       精度到分钟 —— 同一分钟内的多条靠副文本(作者、字数)区分,需要秒级精确时
@@ -134,8 +143,17 @@ window.UI = (function () {
   /* ---------- 角色 ---------- */
   var ROLE_RANK = { VIEWER: 0, EDITOR: 1, ADMIN: 2, OWNER: 3 };
   var ROLE_LABEL = { VIEWER: '只读成员', EDITOR: '编辑者', ADMIN: '管理员', OWNER: '所有者' };
+  /** 角色从高到低:所有角色下拉/筛选的顺序来源 */
+  var ROLES = ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'];
   function roleRank(r) { return ROLE_RANK[r] != null ? ROLE_RANK[r] : -1; }
   function roleLabel(r) { return ROLE_LABEL[r] || r || '-'; }
+  /** 角色下拉选项 HTML(selected 决定选中项;roles 缺省为全部四档) */
+  function roleOptions(selected, roles) {
+    return (roles || ROLES).map(function (r) {
+      return '<option value="' + esc(r) + '"' + (r === selected ? ' selected' : '') + '>' +
+        esc(roleLabel(r)) + '</option>';
+    }).join('');
+  }
 
   /* ---------- 项目权限判定 ----------
      myRole 是服务端 project_role 的综合结果:成员 → 成员角色(全局管理员加入后角色
@@ -151,7 +169,7 @@ window.UI = (function () {
   /** 可写(EDITOR+):上传/新建/编辑/删除内容、回收站的恢复与彻底删除 */
   function canEdit(proj) { return hasRole(proj, 'EDITOR'); }
   /** 能进入并读取(VIEWER+):真成员与全局管理员;公开项目**加入前** myRole 为
-   *  null 过不了这一档(镜像服务端 require_project_role("VIEWER"))。发现页的
+   *  null 过不了这一档(镜像服务端 require_project_role("VIEWER"))。发现空间页签的
    *  "先问要不要加入"不用它 —— 那里看 isMember(参与语义:加入才需要问;
    *  管辖直达走管理后台的模块直达按钮,不经广场)。 */
   function canRead(proj) { return hasRole(proj, 'VIEWER'); }
@@ -484,31 +502,25 @@ window.UI = (function () {
    * 列表行 HTML(弹性型:图标/头像 + 标题 + 副文本 + 徽标 + 操作)。
    * 需要"列与列对齐"的场景请改用 tableHead/tableRow。
    * @param {{icon?:string, iconCls?:string, avatar?:string, title:string, sub?:string,
-   *          badges?:string, meta?:string, actions?:string, raised?:boolean,
-   *          hoverable?:boolean, selected?:boolean, attrs?:string, cls?:string,
-   *          tag?:string, href?:string, subClamp?:boolean}} o
+   *          badges?:string, meta?:string, actions?:string,
+   *          selected?:boolean, attrs?:string, cls?:string}} o
    *   iconCls:图标配色类(fi-pdf 等);avatar:UI.avatar() 的产物,与 icon 二选一
    *   attrs:附加属性串(如 data-id="x");sub/badges/meta/actions 均为已拼好的 HTML
-   *   tag/href:整行作为链接时传 tag:'a' + href(搜索结果卡片)
-   *   subClamp:副文本最多两行(用于展示较长的片段)
    */
   function listRow(o) {
     o = o || {};
-    var cls = ['list-row', o.raised ? 'raised' : '', o.hoverable ? 'hoverable' : '',
-      o.selected ? 'selected' : '', o.cls || ''].filter(Boolean).join(' ');
-    var tag = o.tag || 'div';
-    return '<' + tag + ' class="' + cls + '"' +
-      (tag === 'a' && o.href ? ' href="' + esc(o.href) + '"' : '') +
+    var cls = ['list-row', o.selected ? 'selected' : '', o.cls || ''].filter(Boolean).join(' ');
+    return '<div class="' + cls + '"' +
       (o.attrs ? ' ' + o.attrs : '') + '>' +
       (o.avatar || '') +
       (o.icon ? icon(o.icon, 'row-icon' + (o.iconCls ? ' ' + o.iconCls : '')) : '') +
       '<div class="list-row-main">' +
       '<div class="list-row-title">' + o.title + (o.badges ? ' ' + o.badges : '') + '</div>' +
-      (o.sub ? '<div class="list-row-sub' + (o.subClamp ? ' clamp-2' : '') + '">' + o.sub + '</div>' : '') +
+      (o.sub ? '<div class="list-row-sub">' + o.sub + '</div>' : '') +
       '</div>' +
       (o.meta || '') +
       (o.actions ? '<div class="list-row-acts">' + o.actions + '</div>' : '') +
-      '</' + tag + '>';
+      '</div>';
   }
 
   /* ---------- 数据表格工厂 ---------- */
@@ -601,7 +613,7 @@ window.UI = (function () {
       '</a>';
   }
 
-  /** 项目卡的 "N 成员 · N 文档" 计数行(发现页与项目列表页同款;
+  /** 项目卡的 "N 成员 · N 文档" 计数行(发现空间页签与项目列表页同款;
    * 图标独占一格是为了图标与计数之间保留 meta 行的间距) */
   function projectCountMeta(p) {
     return [
@@ -1490,6 +1502,14 @@ window.UI = (function () {
     set: function (key, v) {
       try { localStorage.setItem(key, v); return true; } catch (e) { return false; }
     },
+    /** JSON 值读写(收藏、浏览记录这类列表偏好:解析/序列化只有这一份) */
+    getJSON: function (key, def) {
+      try { var v = JSON.parse(localStorage.getItem(key)); return v == null ? def : v; }
+      catch (e) { return def; }
+    },
+    setJSON: function (key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch (e) { return false; }
+    },
     remove: function (key) { try { localStorage.removeItem(key); } catch (e) { /* 忽略 */ } },
   };
 
@@ -1688,12 +1708,16 @@ window.UI = (function () {
     icon: icon,
     fileIcon: fileIcon,
     fmtSize: fmtSize,
+    parseDate: parseDate,
     fmtDate: fmtDate,
     fmtDateShort: fmtDateShort,
     fmtWhen: fmtWhen,
+    lastActiveText: lastActiveText,
     copyText: copyText,
     roleRank: roleRank,
     roleLabel: roleLabel,
+    ROLES: ROLES,
+    roleOptions: roleOptions,
     canEdit: canEdit,
     canRead: canRead,
     canAdmin: canAdmin,
@@ -1740,7 +1764,6 @@ window.UI = (function () {
     onMediaChange: onMediaChange,
     NARROW: NARROW,
     dualPanel: dualPanel,
-    panelOpenByDefault: panelOpenByDefault,
     /* 标记类工厂(HTML 字符串) */
     btn: btn,
     iconBtn: iconBtn,

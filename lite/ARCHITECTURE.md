@@ -46,13 +46,16 @@ cd lite/server && uv sync && uv run uvicorn main:app --host 0.0.0.0 --port 8000 
 | `js/route.js` | 路由文法:hash ↔ 路由事实(`Route.resolve` 纯解析、`Route.NAV` 模块导航表、`Route.project/settings/admin` 串构造点)。**视图分派只在这里** |
 | `js/scopes.js` | 渲染机制:作用域链的复用/重建/卸载与片段挂载(见「渲染契约」) |
 | `js/app.js` | 壳(40px 顶栏 + 左栏 + 单一内容面)+ 空间切换器/通知/用户菜单 + 路由入口 + 登录与两步初始化;`App.loadAdmin()` 是 admin 脚本的唯一加载处 |
-| `js/ui.js` | 组件与工具库;角色判定镜像 `UI.can*`;`UI.empty/UI.error`;`UI.drawer`(480 右侧抽屉);`UI.dualPanel`(壳侧栏唯一面板原语) |
+| `js/ui.js` | 组件与工具库;角色判定镜像 `UI.can*`;`UI.empty/UI.error`/`UI.loadInto`;`UI.drawer`(480 右侧抽屉);`UI.dualPanel`(壳侧栏唯一面板原语);共享原语:转义、UTC 时间解析与日期格式、角色顺序/下拉、最后活跃文案、JSON 偏好读写 |
 | `js/ref.js` | 引用契约的前端半边(与 `refs.py` 逐字对齐) |
 | `js/markdown.js` | Markdown 渲染栈(本地 vendor:marked / Prism / KaTeX / Mermaid) |
 | `js/preview.js` | 站内预览浮层;`Preview.kindOf` 是"怎么预览"的唯一判定 |
 | `js/views/home.js` | 空间首页(`#/` 与 `#/p/{pid}/home`)/ 最近 / 收藏与本机收藏存储 |
-| `js/views/palette.js` | Ctrl+K 命令面板(动作 + 文档/文件 + 管理员捷径) |
+| `js/views/palette.js` | Ctrl+K 命令面板(动作 + 文档/文件 + 管理员捷径);**站内搜索唯一入口** |
 | `js/views/*.js` | 其他视图(= 作用域工厂:`XxxLevel(...)` 返回一层作用域描述) |
+
+搜索、最近动态与发现空间都没有独立整页模块:搜索在 `views/palette.js`,最近/收藏在
+`views/home.js`,发现空间是 `app.js` 空间切换器的页签。新增入口不得再建同名整页。
 
 ### 编辑器 `js/editor/`(CM6 的唯一入口)
 
@@ -93,6 +96,11 @@ cd lite/server && uv sync && uv run uvicorn main:app --host 0.0.0.0 --port 8000 
 | ULID 生成与形状 | `ids.py` | 表主键默认值、`IdPath`、取参校验 |
 | 权限判定 | `security/context.py` 的 `project_role`(+ `has_role`/`ensure_project_role`/`require_project_role`) | 全部端点、WS、前端 `UI.can*` 镜像 |
 | "已删即不存在" | `db.is_live` | REST(404)与 WS(4404) |
+| 前端转义 | `UI.esc` | 全部动态文本拼接 |
+| 服务端时间解析/格式化 | `UI.parseDate` / `UI.fmtDate*` / `UI.fmtWhen` | 列表、详情、版本历史 |
+| 角色顺序与下拉 | `UI.ROLES` / `UI.roleOptions` | 空间设置、管理后台用户/空间区 |
+| 最后活跃文案 | `UI.lastActiveText` | 空间设置成员行、用户详情「所属空间」 |
+| 本地 JSON 偏好 | `UI.pref.getJSON/setJSON` | 最近浏览、收藏 |
 | 引用语法 | `services/refs.py` / `ref.js` | 反链、被引用标记、移动前提示、编辑器插入 |
 | 文件物理名 | `storage.storage_basename` | 下载、孤儿扫描、备份打包 |
 | 磁盘余量 | `storage.disk_free_bytes` | 上传前预检、写盘复查、存储总览、恢复前检查 |
@@ -209,7 +217,7 @@ JSON true/false。静默回退会让"传错了却看不出"的调用方一直传
 | 设置页 | 180 + 内容 | 两栏;窄屏单栏 | sp-6 | app.css |
 | 抽屉 | `--drawer-w` 480 | 右侧;窄屏全屏 | sp-4 | app.css + `UI.drawer` |
 | 编辑器列 | 弹性 | — | `--editor-x` 连续(4cqw) | editor.css |
-| 阅读列 | ≤ `--w-read` 880,居中 | — | 列-gap sp-8 | editor.css |
+| 阅读列 | 中列 `minmax(0, 800px)`,居中 | — | 列-gap sp-8 | editor.css |
 
 违例检测仪:`tests/test_layout_contract.py`(静态扫描:媒体查询块须带身份注释,或零间距/宽度赋值)。
 
@@ -274,7 +282,7 @@ JSON true/false。静默回退会让"传错了却看不出"的调用方一直传
 5. **错误与响应形状**从 `errors.py` / `serialize.py` 取,不在端点里手拼。
 6. **路径**从 `endpoints.js` 取,视图里不出现 `/api/` 字面量。
 7. 前端组件优先复用 `UI.loadInto`(加载/错误/空态三态)与 `UI.confirmAction`(确认后执行),
-   而不是每个视图各写一遍。
+   而不是每个视图各写一遍;转义/时间/角色/最后活跃/JSON 偏好也只走 `ui.js` 的单一实现。
 8. **视图就是一个作用域工厂**(`XxxLevel(...)` 返回 `{key, render, child}`):渲染与挂载的
    规矩见「渲染契约」。加一个页面/模块 = 在 `Route.resolve` 或 `Route.NAV` 里挂一个工厂,
    不在 `app.js` 里加分派。

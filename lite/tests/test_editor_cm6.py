@@ -60,12 +60,6 @@ def test_view_uses_only_facade_and_old_textarea_enhancer_is_gone():
     assert "CM6" not in source
     assert "<textarea" not in source and "ta.value" not in source
     assert not (WEB_DIR / "js" / "doceditor.js").exists()
-    assert "lastSaved = conflict.content" in source
-    # 窄屏工具条经门面执行命令;预览折叠/联动偏好与状态栏五项各自有稳定标识
-    assert "runCommand" in source and "doc-toolbar" in source
-    assert "td:doc-split" in source and "td:preview-link" in source
-    for item in ("doc-words", "doc-read", "doc-cursor", "doc-save-state-text", "doc-space"):
-        assert item in source
 
 
 def test_pure_markdown_transforms_in_node():

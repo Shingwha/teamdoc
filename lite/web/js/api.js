@@ -143,4 +143,3 @@ async function apiText(path, { timeoutMs = 60000 } = {}) {
 window.api = api;
 window.apiUpload = apiUpload;
 window.apiText = apiText;
-window.ApiError = ApiError;

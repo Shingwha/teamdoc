@@ -167,8 +167,8 @@ ROUTE_INJECT = '''  <script>
 '''
 
 
-# 管理后台:六个分区的子导航 + 真实切区(总览 → 用户 → 安全)+ 用户详情抽屉开合。
-# 壳变了(admin 改为动态加载 + 左子导航),这里守的是"分区真的切、抽屉真的开"。
+# 管理后台「登录动态」的失败过滤:分区导航/抽屉等已由 test_admin_sections.py 的行为用例
+# 覆盖,这里只保留该文件没有的真实 app.js 集成路径与「仅失败」过滤切换。
 ADMIN_INJECT = '''  <script>
     __LOGIN_STATUS_JS__
     __ERRTRAP_JS__
@@ -185,50 +185,26 @@ ADMIN_INJECT = '''  <script>
       el.textContent = l.join(String.fromCharCode(10));
       document.body.appendChild(el);
     }
-    function go(section, next) {
-      var a = document.querySelector('.admin-nav-item[data-section="' + section + '"]');
-      if (!a) { OUT['nav_' + section] = 'no-link'; report(); return; }
-      a.click();
-      setTimeout(next, 1800);
-    }
     window.addEventListener('load', function () {
       // 与巡检页同款 150ms 延后:等 DOMContentLoaded 触发的首路由(含 /api/auth/me)落定,
       // 否则首路由与本次导航并发,首路由后完成者会用旧渲染覆盖本页
       setTimeout(function () {
-        location.hash = '#/admin';
+        location.hash = '#/admin/security';
         window.dispatchEvent(new HashChangeEvent('hashchange'));
         setTimeout(function () {
-        OUT.navItems = document.querySelectorAll('.admin-nav-item').length;
-        OUT.overviewSection = document.querySelector('#admin-section[data-admin-section="overview"]') ? 1 : 0;
-        go('users', function () {
-          OUT.usersSection = document.querySelector('#admin-section[data-admin-section="users"]') ? 1 : 0;
-          OUT.userRows = document.querySelectorAll('#admin-section .data-table-row').length;
-          var access = document.querySelector('#admin-section .u-access');
-          if (!access) { OUT.drawer = 'no-btn'; go('security', afterSecurity); return; }
-          access.click();
+          OUT.secFilterBtns = document.querySelectorAll('#sec-filter button').length;
+          OUT.secRowsBefore = document.querySelectorAll('#sec-body .data-table-row').length;
+          var failBtn = document.querySelector('#sec-filter button[data-key="fail"]');
+          if (!failBtn) { OUT.failToggle = 'no-btn'; report(); return; }
+          var before = document.querySelector('#sec-body').innerHTML;
+          failBtn.click();
           setTimeout(function () {
-            var box = document.querySelector('.modal-box');
-            OUT.drawer = box && box.textContent.indexOf('用户详情') >= 0 ? 1 : 0;
-            UI.closeAllModals();
-            go('security', afterSecurity);
-          }, 1200);
-        });
-      }, 3000);
+            OUT.failToggleChanged = document.querySelector('#sec-body').innerHTML !== before ? 1 : 0;
+            report();
+          }, 500);
+        }, 3000);
       }, 150);
     });
-    function afterSecurity() {
-      OUT.securitySection = document.querySelector('#admin-section[data-admin-section="security"]') ? 1 : 0;
-      OUT.secFilterBtns = document.querySelectorAll('#sec-filter button').length;
-      OUT.secRowsBefore = document.querySelectorAll('#sec-body .data-table-row').length;
-      var failBtn = document.querySelector('#sec-filter button[data-key="fail"]');
-      if (!failBtn) { OUT.failToggle = 'no-btn'; report(); return; }
-      var before = document.querySelector('#sec-body').innerHTML;
-      failBtn.click();
-      setTimeout(function () {
-        OUT.failToggleChanged = document.querySelector('#sec-body').innerHTML !== before ? 1 : 0;
-        report();
-      }, 500);
-    }
   })();
   </script>
 '''
@@ -327,10 +303,11 @@ def test_route_generation(base_url):
         "\n".join(f"  - {k}: {v}" for k, v in bad.items())
 
 
-def test_admin_sections_and_interactions(base_url):
-    """管理后台五区拆分(views/admin/*.js)后的行为冒烟:
-    静态渲染(五区各有内容)+ 真实点击(仅失败过滤切换、用户详情抽屉开合)。
-    拆分最怕的是事件委托/refresh 注册表静默断裂 —— 必须由真实点击断言。"""
+def test_admin_security_failure_filter(base_url):
+    """真实 app.js 动态加载管理脚本后，「仅失败」过滤仍能切换登录动态内容。
+
+    分区导航、用户/空间抽屉、PAT 审计与配额卡由 test_admin_sections.py 的行为用例守;
+    本文件只保留真实路由入口 + 动态脚本注入下的过滤交互。"""
     chrome = find_chrome()
     if not chrome:
         pytest.skip("未找到 Chrome/Edge,跳过管理后台巡检")
@@ -342,16 +319,6 @@ def test_admin_sections_and_interactions(base_url):
     assert info.get("errors", "?") == "none", f"管理后台 JS 错误: {info.get('errors')}"
 
     problems = []
-    if int(info.get("navItems", "0")) != 6:
-        problems.append("管理后台左子导航没有六个分区")
-    if info.get("overviewSection") != "1":
-        problems.append("默认分区不是总览")
-    if info.get("usersSection") != "1":
-        problems.append("切到「用户」分区没有生效")
-    if int(info.get("userRows", "0")) < 1:
-        problems.append("用户分区没有用户行(初始化管理员应至少一条)")
-    if info.get("securitySection") != "1":
-        problems.append("切到「安全」分区没有生效")
     if int(info.get("secFilterBtns", "0")) != 2:
         problems.append("登录动态的 全部/仅失败 过滤段没渲染")
     if int(info.get("secRowsBefore", "0")) < 1:
@@ -360,9 +327,5 @@ def test_admin_sections_and_interactions(base_url):
         problems.append("找不到'仅失败'按钮,过滤切换未执行")
     elif info.get("failToggleChanged") != "1":
         problems.append("点'仅失败'后登录动态内容没有变化 —— 过滤切换断了")
-    if info.get("drawer") == "no-btn":
-        problems.append("找不到'用户详情'按钮,抽屉断言未执行")
-    elif info.get("drawer") != "1":
-        problems.append("点'用户详情'没有弹出用户详情抽屉")
 
     assert not problems, "管理后台交互断言失败:\n" + "\n".join("  - " + p for p in problems)

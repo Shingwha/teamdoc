@@ -1,6 +1,6 @@
 // views/projects.js — 空间管理页(#/projects):空间卡片网格 + 创建空间向导
 window.Views = window.Views || {};
-// 公开空间的加入入口**只有这一份**(发现页卡片询问与空间页的 403 错误态共用)。
+// 公开空间的加入入口**只有这一份**(发现空间页签的询问与空间页的 403 错误态共用)。
 window.ProjectsAPI = (function () {
   'use strict';
 

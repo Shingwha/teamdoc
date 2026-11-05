@@ -6,7 +6,7 @@
    **语法规格与逐条用例在 `lite/MARKDOWN.md` 与 `lite/tests/test_markdown_render.py`**:这里改规则,
    那两处要一起改(它们是对外承诺)。
    安全:raw HTML 一律转义(多人协作防 XSS),只支持纯 Markdown 语义;teamdoc:// 引用链接输出为普通 <a>,
-   由 editor.css 的 chip 样式与 doceditor.js 的全局点击路由接管。 */
+   由 editor.css 的 chip 样式与 ref.js 的全局点击路由接管。 */
 (function () {
   'use strict';
 

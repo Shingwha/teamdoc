@@ -8,7 +8,6 @@ window.AdminSections = window.AdminSections || {};
 (function () {
   'use strict';
 
-  const ROLES = ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'];
   const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
 
   // 结果码 → 徽标。服务端给稳定代码,文案只在前端映射(与 roleLabel 同一分工)。
@@ -24,7 +23,6 @@ window.AdminSections = window.AdminSections || {};
   }
   function deviceIcon(kind) { return kind === 'mobile' ? 'smartphone-line' : 'computer-line'; }
   // security 区复用登录结果徽标;它按 App.loadAdmin 的顺序在本文件之后加载
-  window.AdminSections.RESULT_META = RESULT_META;
   window.AdminSections.resultBadge = resultBadge;
 
   /** 锁定徽标:文案只写「已锁定」,完整时间进 title —— 列表里那列曾被
@@ -353,8 +351,7 @@ window.AdminSections = window.AdminSections || {};
           ' placeholder="搜索空间名称" autocomplete="off"></div>' +
           '<div class="field mt-3"><label>加入角色</label>' +
             '<select class="select" id="sp-role">' +
-              ROLES.map((r) => '<option value="' + r + '"' +
-                (r === 'EDITOR' ? ' selected' : '') + '>' + UI.esc(UI.roleLabel(r)) + '</option>').join('') +
+              UI.roleOptions('EDITOR') +
             '</select></div>' +
           '<div id="sp-list" class="pp-list">' + UI.loadingRow() + '</div>',
         actions: [
@@ -573,11 +570,7 @@ window.AdminSections = window.AdminSections || {};
       const joined = entry.createdAt
         ? '加入于 ' + UI.fmtDateShort(entry.createdAt)
         : '加入时间未知';
-      const hasActive = Object.prototype.hasOwnProperty.call(entry, 'lastActiveAt');
-      const active = entry.lastActiveAt
-        ? '最后活跃 ' + UI.fmtDateShort(entry.lastActiveAt)
-        : (hasActive ? '从未活跃' : '最后活跃未知');
-      return joined + ' · ' + active;
+      return joined + ' · ' + UI.lastActiveText(entry.lastActiveAt);
     }
 
     /** 所属空间:空间名 + 角色(行内直接改)+ 移出;加入空间走统一的空间选择浮层。
@@ -592,8 +585,7 @@ window.AdminSections = window.AdminSections || {};
           actions:
             '<select class="select admin-space-role" data-pid="' + UI.esc(entry.space.id) + '"' +
             ' title="在「' + UI.esc(entry.space.name) + '」中的角色">' +
-              ROLES.map((r) => '<option value="' + r + '"' +
-                (r === entry.role ? ' selected' : '') + '>' + UI.esc(UI.roleLabel(r)) + '</option>').join('') +
+              UI.roleOptions(entry.role) +
             '</select>' +
             UI.iconBtn({
               icon: 'delete-bin-line', title: '移出空间', danger: true,

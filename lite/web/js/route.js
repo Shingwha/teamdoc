@@ -42,7 +42,7 @@ window.Route = (function () {
       level: function (r) { return Views.trashLevel(r); },
       visible: function (p) { return !p || UI.canRead(p); } },
     { key: 'settings', icon: 'settings-4-line', label: '空间设置', mode: 'narrow',
-      level: function (r) { return Views.spaceSettingsLevel(r); },
+      level: function (r) { return Views.projectSettingsLevel(r); },
       visible: function () { return true; } },
   ];
   const NAV_KEYS = NAV.map(function (n) { return n.key; });
@@ -157,7 +157,6 @@ window.Route = (function () {
     settings: settings,
     admin: admin,
     navOf: navOf,
-    lastTab: lastTab,
     current: currentRoute,
     setCurrent: setCurrent,
   };

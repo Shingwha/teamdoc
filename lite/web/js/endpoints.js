@@ -60,7 +60,6 @@ window.Endpoints = (function () {
     docsOf(pid) { return projectSub(pid, '/docs'); },
     doc(id) { return '/api/docs/' + enc(id); },
     docContent(id) { return '/api/docs/' + enc(id) + '/content'; },
-    docAppend(id) { return '/api/docs/' + enc(id) + '/append'; },
     docBacklinks(id) { return '/api/docs/' + enc(id) + '/backlinks'; },
     docMove(id) { return '/api/docs/' + enc(id) + '/move'; },
     docMoveCheck(id, params) { return '/api/docs/' + enc(id) + '/move-check' + qs(params); },

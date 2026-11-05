@@ -7,8 +7,7 @@ window.AdminSections = window.AdminSections || {};
 (function () {
   'use strict';
 
-  const ROLES = ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'];
-  const ROLE_OPTIONS = ROLES.map((r) => ({ value: r, label: UI.roleLabel(r) }));
+  const ROLE_OPTIONS = UI.ROLES.map((r) => ({ value: r, label: UI.roleLabel(r) }));
 
   const TPL = 'minmax(0, 1.35fr) minmax(0, 1fr) 64px minmax(0, 0.85fr) 104px var(--col-acts)';
   const HEADS = [
@@ -48,8 +47,7 @@ window.AdminSections = window.AdminSections || {};
       actions:
         '<select class="select admin-member-role" data-uid="' + UI.esc(m.userId) + '"' +
         (archived ? ' disabled' : '') + '>' +
-          ROLE_OPTIONS.map((r) => '<option value="' + r.value + '"' +
-            (r.value === m.role ? ' selected' : '') + '>' + UI.esc(r.label) + '</option>').join('') +
+          UI.roleOptions(m.role) +
         '</select>' +
         (archived ? '' : UI.iconBtn({
           icon: 'user-minus-line', title: '移出空间', danger: true,

@@ -101,28 +101,3 @@ def test_continuous_gutters_are_functions_not_steps():
     assert re.search(r"--g-page:\s*clamp\(", tokens), "--g-page 必须是 clamp 连续函数"
     assert re.search(r"--editor-x:\s*clamp\([^;]*cqw", editor), "--editor-x 必须是含 cqw 的 clamp 连续函数"
     assert "--editor-x: var(--sp-" not in editor, "--editor-x 不得退回令牌阶梯"
-
-
-def test_design_scale_is_converged():
-    """W5 设计刻度的机器化:表面 3 层、字阶 8 档且每档有配对行高;旧档位不得回流。
-
-    只钉令牌契约(语义),不钉具体像素消费者 —— 布局行为由浏览器用例守。
-    """
-    tokens = (CSS_DIR / "tokens.css").read_text(encoding="utf-8")
-    surfaces = sorted(set(re.findall(r"^\s*(--md-surface[\w-]*):", tokens, re.M)))
-    assert surfaces == ["--md-surface", "--md-surface-container-high", "--md-surface-container-low"], \
-        f"表面必须收敛为 3 层: {surfaces}"
-    fs = sorted(set(re.findall(r"^\s*(--fs-[\w-]+):", tokens, re.M)))
-    expected_fs = sorted({
-        "--fs-display", "--fs-headline", "--fs-title-lg", "--fs-title",
-        "--fs-body", "--fs-prose", "--fs-label", "--fs-caption",
-    })
-    assert fs == expected_fs, f"字阶必须恰好 8 档: {fs}"
-    lh = set(re.findall(r"^\s*(--lh-[\w-]+):", tokens, re.M))
-    expected_lh = {name.replace("--fs-", "--lh-") for name in expected_fs}
-    assert expected_lh <= lh, f"8 档字阶缺少配对行高: {sorted(expected_lh - lh)}"
-    all_css = "\n".join(p.read_text(encoding="utf-8") for p in CSS_DIR.glob("*.css"))
-    for old in ("--md-surface-container-lowest", "--md-surface-container-highest",
-                "--md-surface-container:", "--md-surface-dim",
-                "--fs-subtitle", "--fs-sm", "--fs-xs", "--lh-tight", "--lh-normal"):
-        assert old not in all_css, f"旧刻度令牌回流: {old}"

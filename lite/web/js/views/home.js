@@ -8,13 +8,8 @@ window.Favorites = (function () {
   'use strict';
   const KEY = 'td:favs:';
   function storeKey() { return KEY + ((App.user && App.user.id) || 'anon'); }
-  function read() {
-    try { return JSON.parse(localStorage.getItem(storeKey()) || '[]') || []; }
-    catch (e) { return []; }
-  }
-  function write(list) {
-    try { localStorage.setItem(storeKey(), JSON.stringify(list.slice(0, 200))); } catch (e) { /* 配额满时放弃 */ }
-  }
+  function read() { return UI.pref.getJSON(storeKey(), []); }
+  function write(list) { UI.pref.setJSON(storeKey(), list.slice(0, 200)); }
   function list() { return read(); }
   function has(id) { return read().some((x) => x.id === id); }
   function toggle(item) {

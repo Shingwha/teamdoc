@@ -39,9 +39,13 @@ uv run pytest ../tests -m slow    # 只跑弹性/压测组
 | `test_login_throttle.py` | 登录节流:账号维度(锁定/退避/清零/**重启后仍锁**)与来源维度(密码喷洒),自带专用实例 |
 | `test_session_audit.py` | 管理端登录状态与审计:用户列表字段、用户详情、强制下线、解锁、登录动态 |
 | `test_frontend_refs.py` | 前端跨模块引用的静态检查:`Mod.fn()` 必须真的在模块导出面上(漏导出只在用户点到那个入口时才炸,构建步骤缺失,只能静态盯) |
+| `test_layout_contract.py` | 布局契约静态扫描(ARCHITECTURE.md「布局契约」):媒体查询块不得写间距/宽度、960 形态断点只在 app.css/UI.NARROW、面板状态只有 dualPanel、连续边距必须是 clamp |
+| `test_editor_cm6.py` | 编辑器真实行为:vendor 离线 IIFE 与依赖锁、`DocEditor` 门面(程序化设值不触发 onChange、Mod-k 不冒泡)、Markdown 续行/围栏、文档编辑主路径、宽屏预览分栏与折叠、窄屏工具条与状态栏 |
+| `test_drive_versions.py` | 云空间版本交互行为(桩数据层):瓦片/行/右键三处版本入口、版本抽屉与备注、工具条排序带 sort/dir 重新取数、选中文件后「上传新版本」入口、dispose 收尾 |
+| `test_admin_sections.py` | 管理后台分区行为(桩数据层):子导航与路由取段、用户区搜索/chips/多选/详情抽屉、空间区成员抽屉、深链 `?q=`/`?user=`、PAT 审计四态、配额卡成员抽屉 |
 | `test_render_contract.py` | 渲染契约(ARCHITECTURE.md「渲染契约」节):静态盯"#view 只许路由层碰 / 分派只在路由表 / 视图不得加页面模式类";浏览器里真点击切文档,断言左栏导航与文档树的**节点身份**不变、不重新取空间对象与文档树(整块重建既不报错也不影响可用性,只能这样盯);切到折叠区里的文档时只原地展开祖先,树不重建 |
 | `test_page_assets.py` | 零外链 + no-cache + KaTeX 字体/Prism 语言包/Mermaid 图表库全量可达(**内网部署前后必跑,只读可对生产**) |
-| `test_visual_sweep.py` | 真实 app.js 巡检:逐页渲染(首页/空间管理/设置三页/管理后台/空间内六页)+ 左栏、空间切换器两页签与底部入口、Ctrl+K 命令面板、文档树折叠 + App.route 生成点串比对 + 管理后台六分区子导航与用户详情抽屉 |
+| `test_visual_sweep.py` | 真实 app.js 巡检:逐页渲染(首页/空间管理/设置三页/管理后台/空间内六页)+ 左栏、空间切换器两页签与底部入口、Ctrl+K 命令面板、文档树折叠 + App.route 生成点串比对 + 管理后台真实动态加载下的「仅失败」过滤 |
 | `test_join_drill.py` | 浏览器演练:公开空间自助加入的两条入口(空间切换器「发现空间」页签加入 / 直链 403),真点击到"加入后能读" |
 | `test_markdown_render.py` | Markdown 语法规则单测(在 node 里加载真实 markdown.js,毫秒级;缺 node 自动 skip):公式定界/脚注/高亮/上下标/代码块 class/HTML 转义、"懒加载什么时候该拉库",以及文内锚点点击的分流(拦文内锚点、放行 `#/` 路由) |
 | `test_markdown_diagram.py` | 浏览器演练:Markdown 扩展语法 —— 图表(Mermaid)懒加载门槛/渲染出 SVG、公式与价格文本的边界、脚注角标与 ↩ 回跳真的滚动且**不改路由**、零跨源请求、切主题重画 |
@@ -51,6 +55,23 @@ uv run pytest ../tests -m slow    # 只跑弹性/压测组
 起服、登录、上传、断言这些动作各只有一份实现,都在 `_harness` + conftest 里;
 测试文件只写场景。每个会话自建隔离实例(临时数据目录 + 空闲端口 + 真实子进程),
 所以可以随便造数据,也能测"重启后生效"这类行为。
+
+## 前端测试保留口径
+
+前端用例只守三类东西:**真实用户动作**(浏览器点击/输入/抽屉/滚动)、**对外契约**
+(导出面、端点、零外链、路由串)与**架构不变量**(布局/渲染/面板的单一来源)。
+不写精确令牌清单,也不逐函数名/类名做字符串断言 —— 那种用例改实现写法就红,
+却抓不到"按钮点了没反应"。
+
+- 云空间版本:行为在 `test_drive_versions.py`(一条 `driveBody` 用例覆盖三处入口、
+  时间线备注、排序取数与上传入口);服务端版本语义在 `test_file_versions.py` /
+  `test_file_version_services.py`。
+- 编辑器:门面/续行/宽窄屏行为在 `test_editor_cm6.py`;静态只保留"视图不得绕过
+  `DocEditor` 门面"这一条边界。
+- 管理后台:`test_admin_sections.py` 守分区与抽屉行为,`test_visual_sweep.py` 只保留
+  真实 app.js 动态加载下的登录动态过滤(其余分区/抽屉断言不重复)。
+- 设计刻度与布局:由 `test_layout_contract.py` 的机制约束与浏览器巡检守,不维护
+  逐令牌清单。
 
 ## 特殊场景
 

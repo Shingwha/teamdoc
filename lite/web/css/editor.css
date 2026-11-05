@@ -349,13 +349,9 @@ html[data-theme="dark"] a[href^="teamdoc://"]:hover { filter: brightness(1.12); 
 
 /* ---------- 8. 历史版本预览(模态框内,列表用 .list-row) ---------- */
 
-/* ---------- 9. 编辑头窄屏替身(「···」) ----------
-   桌面:保存状态/协同头像/历史内联在编辑头上,替身按钮隐藏;
-   ≤720:三者收进「···」菜单(内容构造见 views/doc-editor.js 的 buildMoreMenu),
-   模式分段压成纯图标给标题让宽 —— 替身按钮模式同壳侧栏的折叠态搜索按钮 */
-.editor-head .head-more { display: none; }
-/* 冲突时替身按钮可见信号(窄屏状态下拉不可见,保存按钮同样可作处理入口) */
-.editor-head .head-more.conflict { color: var(--md-error); }
+/* ---------- 9. 编辑头「···」菜单 ----------
+   历史版本与当前保存状态摘要都收在这个菜单里(内容构造见 views/doc-editor.js 的
+   buildMoreMenu),所有宽度都保留入口;≤600 时状态/头像也收进菜单(见下方容器查询)。 */
 .menu-header .head-more-status { font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--md-on-surface-variant); }
 .menu-header .head-more-presence { display: flex; gap: var(--sp-0-5); margin-top: var(--sp-1); }
 
@@ -369,7 +365,6 @@ html[data-theme="dark"] a[href^="teamdoc://"]:hover { filter: brightness(1.12); 
   .editor-head { gap: var(--sp-2); }
   .editor-head .save-status,
   .editor-head .presence-inline { display: none; }
-  .editor-head .head-more { display: inline-flex; }
 }
 /* 第二级(手机整宽,编辑列 ≈ 视口 − 76px 图标栏):带标签的分段比可用宽度
    还宽出约 20px,会把 ··· 挤到贴屏(右留白 0、左 16,不对称)。分段退为纯图标,

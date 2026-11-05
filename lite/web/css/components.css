@@ -716,7 +716,6 @@
    与 .page-head 同一间距配方,但高度更矮、用于内容区顶部(云空间面包屑行、
    文档树头、上传面板头等)。左右两端分别为上下文信息与操作组 */
 .toolbar { margin-bottom: var(--sp-4); }
-.toolbar-title { font-weight: var(--fw-semi); }
 /* 按钮组允许换行:窄屏放不下整组时(云空间的 新建文件夹/上传文件夹/上传)折行而不是溢出裁切 */
 .toolbar-actions { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; --ctl-h: var(--ctl-m); }
 
@@ -874,13 +873,10 @@
    撑破声明的 --col-acts 并压到相邻列上) */
 /* 用户表:一行最多 5 个操作(编辑/重置密码/用户详情/禁用/删除) */
 .data-table.acts-5 { --acts-n: 5; }
-/* 项目表(管理后台):一行最多 6 个操作(文档/云空间/成员/回收站/设置 五个模块直达 + 删除;
-   个人空间行不渲染,列宽仍按 6 档取齐) */
-.data-table.acts-6 { --acts-n: 6; }
 
-/* ============ 列表行(弹性型列表:成员 / 回收站 / 令牌 / 历史版本 / 搜索结果) ============
+/* ============ 列表行(弹性型列表:成员 / 回收站 / 令牌 / 历史版本 / 命令面板结果) ============
    与 .data-table 分工:需要"列与列对齐"用表格,只需"图标+文字+操作"的用列表行。
-   默认以细分隔线串联成一列;.raised 为独立卡片式(搜索结果) */
+   默认以细分隔线串联成一列 */
 .list-row {
   display: flex;
   align-items: center;
@@ -905,37 +901,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 副文本需要多行展示时(搜索结果的命中片段):最多两行,用正文字号与常规行距便于阅读 */
-.list-row-sub.clamp-2 {
-  white-space: normal;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  font-size: var(--fs-body); line-height: var(--lh-body);
-  margin-top: var(--sp-0-5);
-}
 /* 行内操作组 */
 .list-row-acts { display: flex; align-items: center; gap: var(--sp-0-5); flex: none; --ctl-h: var(--ctl-m); }
 /* 行内操作里的下拉不应撑满(此前写成 .list-row > .select,而 listRow 把操作
    包在 .list-row-acts 里,该规则永不匹配,成员行的角色下拉因此一直试图占满) */
 .list-row-acts > .select { width: auto; }
-/* 行内可点行的 hover(仅用于整行可点/可操作时) */
-.list-row.hoverable { cursor: pointer; transition: background-color var(--motion-fast); }
-.list-row.hoverable:hover { background: color-mix(in srgb, var(--md-on-surface) var(--state-hover), transparent); }
-.list-row.hoverable:active { background: color-mix(in srgb, var(--md-on-surface) var(--state-active), transparent); }
-/* 独立卡片式(搜索结果):自撑表面 + 圆角 + 悬停阴影 */
-.list-row.raised {
-  padding: var(--sp-4) var(--sp-5);
-  border-bottom: none;
-  border-radius: var(--radius-l);
-  background: var(--md-surface-container-low);
-  color: var(--md-on-surface);
-  transition: box-shadow var(--motion), background-color var(--motion);
-}
-.list-row.raised:hover { text-decoration: none; box-shadow: var(--shadow-1); }
-.list-row.raised .row-icon { margin-top: var(--sp-0-5); }
-/* 卡片式行以"标题"为主信息,用半粗体与列表行区分 */
-.list-row.raised .list-row-title { font-weight: var(--fw-semi); }
 /* 选中态(历史版本) */
 .list-row.selected { background: var(--md-primary-container); color: var(--md-on-primary-container); }
 .list-row.selected .list-row-sub { color: inherit; opacity: .75; }
@@ -1025,9 +995,6 @@
 .section-title:first-of-type { margin-top: var(--sp-4); }
 /* 分区操作推到标题行右端,与它作用的列表同宽同容器 */
 .section-actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); }
-
-/* 卡片式列表容器(搜索结果):纵向排列,卡片之间留空隙 */
-.result-list { display: flex; flex-direction: column; gap: var(--sp-2); }
 
 /* ============ 可点卡片(项目卡等:整卡为一个链接) ============ */
 .card-link {
