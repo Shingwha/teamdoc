@@ -17,7 +17,7 @@ from models import Doc, File, FileVersion, Folder
 from security.context import (Actor, ensure_move_allowed, ensure_project_role,
                               get_project_or_404, load_live, validate_parent)
 from serialize import file_json, folder_json, historical_file_json, iso
-from services import refs, versions
+from services import quota, refs, versions
 from services.users import user_map, user_names
 from storage import (INFLIGHT_STORAGE, disk_free_bytes, disk_total_bytes,
                      file_abspath, unlink_quiet)
@@ -191,6 +191,13 @@ def move_folder(db: DbSession, folder: Folder, payload: dict, ctx: Actor) -> dic
     ids = collect_subtree(db, Folder, folder)
     parent_id = opt_id(payload.get("parentId"))
     validate_parent(db, Folder, parent_id, target_id, moving=folder, label="父文件夹")
+    if target_id != src_id:
+        # 跨空间移动把整棵子树的物理占用带到目标空间；按去重路径计量，
+        # 配额不足时在改动任何记录之前拒绝。
+        moving_ids = [fid for (fid,) in db.query(File.id)
+                      .filter(File.folder_id.in_(ids)).all()]
+        quota.ensure_quota(db, get_project_or_404(db, target_id),
+                           quota.file_bytes(db, moving_ids))
     affected = db.query(File).filter(File.folder_id.in_(ids)).all() if target_id != src_id else []
     folder.parent_id = parent_id
     if target_id != src_id:
@@ -339,6 +346,8 @@ async def store_upload(db: DbSession, ctx: Actor, plan: UploadPlan, stream,
         if plan.version_of:
             f = load_live(db, File, plan.version_of, "文件")
             ensure_project_role(db, ctx, f.project_id, "EDITOR", write=True)
+            # 新版本保留旧物理文件，按本次写入的完整字节数计量。
+            quota.ensure_quota(db, get_project_or_404(db, f.project_id), total)
             versions.append_version(db, f, storage_name, total, ctx.user.id,
                                     at=now, note=plan.note)
         else:
@@ -348,7 +357,7 @@ async def store_upload(db: DbSession, ctx: Actor, plan: UploadPlan, stream,
                 doc = load_live(db, Doc, plan.doc_id, "文档")
                 project_id = doc.project_id
                 folder_id = _attach_folder(db, project_id)
-            get_project_or_404(db, project_id)
+            project = get_project_or_404(db, project_id)
             ensure_project_role(db, ctx, project_id, "EDITOR", write=True)
             if folder_id:
                 validate_parent(db, Folder, folder_id, project_id, label="父文件夹")
@@ -363,6 +372,7 @@ async def store_upload(db: DbSession, ctx: Actor, plan: UploadPlan, stream,
                     q = q.filter(File.folder_id == folder_id) if folder_id else q.filter(
                         File.folder_id.is_(None))
                     _name_exists(db, q.first())
+            quota.ensure_quota(db, project, total)
             f = File(name=display_name, project_id=project_id, folder_id=folder_id,
                      created_by=ctx.user.id, updated_by=ctx.user.id,
                      created_at=now, updated_at=now, version=1,
@@ -395,6 +405,10 @@ def move_file(db: DbSession, f: File, payload: dict, ctx: Actor) -> dict:
     src_id = f.project_id
     ensure_move_allowed(db, ctx, src_id, target_id)
     validate_parent(db, Folder, folder_id, target_id, label="目标文件夹")
+    if target_id != src_id:
+        # 移动消耗目标空间字节；不通过时在写库前拒绝，源空间保持原样。
+        quota.ensure_quota(db, get_project_or_404(db, target_id),
+                           quota.file_bytes(db, [f.id]))
     now = utcnow()
     if target_id != src_id:
         versions.record_change(db, f, "delete", at=now, space_id=src_id)

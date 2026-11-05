@@ -32,6 +32,9 @@ READ_ONLY_TOKEN = "READ_ONLY_TOKEN"
 # 403:空间已归档。读与直达仍可用，但任何内容/成员写入都要先解除归档。
 # 单独成码，前端才能把"归档了"与"没权限"区分开。
 SPACE_ARCHIVED = "SPACE_ARCHIVED"
+# 403:空间物理占用已达配额上限。detail 额外带 quotaBytes/usedBytes/requiredBytes，
+# 前端与 CLI 才能显示"差多少"而不是只提示"配额不足"。
+QUOTA_EXCEEDED = "QUOTA_EXCEEDED"
 # 404:资源不存在,或存在但对调用方不可见(两种情况不区分,避免探测)
 NOT_FOUND = "NOT_FOUND"
 # 409:资源都在,是这次操作本身不成立(重名、成环、最后一个所有者……)

@@ -23,7 +23,8 @@ window.AdminSections = window.AdminSections || {};
   }
 
   function usageHtml(p) {
-    const used = Number(p.storageBytes) || 0;
+    // 配额列与硬限制同口径：含历史版本与回收站；旧数据缺字段时回退活跃口径。
+    const used = Number(p.quotaUsedBytes != null ? p.quotaUsedBytes : p.storageBytes) || 0;
     const quota = Number(p.quotaBytes) || 0;
     if (quota > 0) {
       const pct = Math.round((used / quota) * 100);

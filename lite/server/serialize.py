@@ -152,6 +152,8 @@ def project_json(p, *, face: str = "member", my_role: str | None = None,
             "memberCount": s.get("memberCount", 0),
             "docCount": s.get("docCount", 0),
             "storageBytes": s.get("storageBytes", 0),
+            # 配额计量含历史版本与回收站，与只算活跃文件的 storageBytes 区分。
+            "quotaUsedBytes": s.get("quotaUsedBytes", 0),
         }
     if face == "admin":
         return {
@@ -164,6 +166,7 @@ def project_json(p, *, face: str = "member", my_role: str | None = None,
             "memberCount": s.get("memberCount", 0),
             "docCount": s.get("docCount", 0),
             "storageBytes": s.get("storageBytes", 0),
+            "quotaUsedBytes": s.get("quotaUsedBytes", 0),
             "owners": owners or [],
         }
     raise ValueError(f"未知的 project face: {face}")

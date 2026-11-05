@@ -113,11 +113,15 @@ def _near_quota(db: DbSession, threshold: float = 0.8) -> list[dict]:
     stats = batch_stats(db, [p.id for p in rows])
     out = []
     for p in rows:
-        used = int(stats.get(p.id, {}).get("storageBytes", 0))
+        s = stats.get(p.id, {})
+        # 预警必须与硬限制同口径：含历史版本与回收站，否则会出现"预警很轻、
+        # 上传却被拒"的矛盾提示。storageBytes 保留为活跃文件口径。
+        used = int(s.get("quotaUsedBytes", 0))
         ratio = used / p.quota_bytes if p.quota_bytes else 0
         if ratio >= threshold:
             out.append({"id": p.id, "name": p.name,
-                        "quotaBytes": p.quota_bytes, "storageBytes": used,
+                        "quotaBytes": p.quota_bytes, "usedBytes": used,
+                        "storageBytes": int(s.get("storageBytes", 0)),
                         "ratio": round(ratio, 4)})
     out.sort(key=lambda x: x["ratio"], reverse=True)
     return out
