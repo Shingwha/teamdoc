@@ -70,6 +70,8 @@ W4-a..d 文件范围不相交，可并行（最后一批共享工作区波次）
 - W4 门禁：`uv run pytest ../tests` → **180 passed, 1 skipped, 1 failed, 3 deselected**（108.11 秒）；唯一失败为登记的 Mermaid 基线。slow 组 **3 passed**。W4 期间删除了一条“大纲初始高亮必须恰好第一节”的时序脆弱断言，保留“有高亮 + 滚动后变化”的行为契约。
 - W4 新增契约已落地：通知（加入空间/角色变更/转让）、只读 PAT 审计、版本备注、成员 `createdAt/lastActiveAt`、409 `updatedByName`。
 - **基线**：分支 `refactor/teamdoc-v1.4` 提交 W1–W4 成果；W5 起每波独立 worktree + 分支，lead `merge --no-ff`。
+- W5：✅ 已合并（`55e846d`，分支 `wave/w5-polish`，4 个提交）。三层表面/8 档字阶/行高 44/按钮默认 sm/触控 40/表格横滚/状态四态收口。worktree 门禁与合并后主检出门禁均为 **181 passed, 1 skipped, 1 failed（仅 Mermaid 基线）, 3 deselected**；slow 组 3 passed。
+- W5 新增 `test_design_scale_is_converged`（精确令牌清单）；属 W7 测试收敛评估项，若判定为脆弱静态断言则删除。
 - 遗留（不在本次范围）：`test_markdown_diagram` 的 Mermaid 切主题重画失败为登记基线；归档空间是否排除搜索、配额硬限制为后续产品决策；空间设置抽屉的转让/归档真实点击未逐项流水（接口与静态契约已验）。
 
 ## 接口索引
