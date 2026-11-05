@@ -12,8 +12,6 @@ from http_util import clamp_int, query_id
 from ids import IdPath
 from security.context import AuthContext, pat_write_guard, require_admin
 from services import audit, backup, users
-from services.files import (MAX_UPLOAD_BYTES, MAX_UPLOAD_MB, chunked_file,
-                            raise_for_body_status, save_request_body)
 
 router = APIRouter(dependencies=[Depends(pat_write_guard)])
 
@@ -85,22 +83,9 @@ def admin_projects(ctx: AuthContext = Depends(require_admin),
 def download_backup(ctx: AuthContext = Depends(require_admin),
                     db: DbSession = Depends(get_db)):
     release_db(db)
-    if not backup.BACKUP_LOCK.acquire(timeout=300):
-        err(409, CONFLICT, "另一轮备份正在进行,请稍后再试")
-    try:
-        archive, size, _stats = backup.build_archive()
-    finally:
-        backup.BACKUP_LOCK.release()
-
-    def gen():
-        try:
-            with open(archive, "rb") as fh:
-                yield from chunked_file(fh)
-        finally:
-            archive.unlink(missing_ok=True)
-
+    archive, size = backup.build_download_archive()
     cd = "attachment; filename*=UTF-8''" + quote(archive.name)
-    return StreamingResponse(gen(), media_type="application/zip",
+    return StreamingResponse(backup.stream_archive(archive), media_type="application/zip",
                              headers={"Content-Disposition": cd,
                                       "Content-Length": str(size)})
 
@@ -123,24 +108,11 @@ def restore_status(ctx: AuthContext = Depends(require_admin)):
 @router.post("/api/admin/restore/upload")
 async def restore_upload(request: Request, ctx: AuthContext = Depends(require_admin),
                          db: DbSession = Depends(get_db)):
-    st = backup.restore_status()
-    if st.get("armed"):
-        err(409, CONFLICT, "已有一份待重启生效的备份。请先取消它,或重启服务使其生效后再上传")
     try:
         declared = int(request.headers.get("content-length") or 0)
     except ValueError:
         declared = 0
-    if declared and declared > MAX_UPLOAD_BYTES:
-        err(400, VALIDATION, f"备份过大(上限 {MAX_UPLOAD_MB}MB)")
-    release_db(db)
-    backup.STAGING_DIR.mkdir(parents=True, exist_ok=True)
-    part = backup.STAGING_UPLOAD.with_name("restore-upload.zip.part")
-    status, _total = await save_request_body(request.stream(), part, MAX_UPLOAD_BYTES)
-    raise_for_body_status(status, kind="备份")
-    info, msg = backup.stage_upload(part)
-    if not info:
-        err(400, VALIDATION, msg)
-    return {"ok": True, "info": info}
+    return await backup.receive_restore_upload(db, request.stream(), declared)
 
 
 @router.post("/api/admin/restore/arm")

@@ -3,13 +3,14 @@ import config
 from sqlalchemy import func
 from sqlalchemy.orm import Session as DbSession
 
-from db import utcnow
+from db import SessionLocal, is_live, utcnow
 from errors import CONFLICT, NOT_FOUND, bad_request, err
 from http_util import id_field, int_field, opt_id, query_id, str_field
 from models import Doc, DocVersion, File, Project, User
 from security.context import (AuthContext, ensure_move_allowed, get_project_or_404,
+                              has_role, project_role, session_context, space_archived,
                               validate_parent)
-from serialize import doc_json, version_json
+from serialize import avatar_color_for, doc_json, version_json
 from services import refs
 from services.spaces import visible_project_ids
 from services.users import user_names
@@ -27,6 +28,19 @@ class ContentConflict(Exception):
         self.version = version
         self.content = content
         self.by_name = by_name
+
+
+WS_SESSION_INVALID = 4401
+WS_FORBIDDEN = 4403
+WS_NOT_FOUND = 4404
+
+
+class WsRejected(Exception):
+    """WebSocket 业务拒绝：携带关闭码，由路由决定如何结束连接。"""
+
+    def __init__(self, code: int):
+        super().__init__(str(code))
+        self.code = code
 
 
 def _user_name(db: DbSession, user_id: str | None) -> str:
@@ -203,6 +217,58 @@ def _save_content(db: DbSession, doc: Doc, content: str, user_id: str,
                                   base_version=base_version)
     db.commit()
     return {"version": version}
+
+
+# ---------- WebSocket 业务（连接与协议帧由 routers/ws.py 负责） ----------
+
+def _ws_access(db: DbSession, token: str | None, doc_id: str):
+    """复核会话、文档可见性与空间角色；失败以关闭码拒绝。"""
+    ctx = session_context(db, token)
+    if ctx is None:
+        raise WsRejected(WS_SESSION_INVALID)
+    doc = db.get(Doc, doc_id)
+    if not is_live(doc):
+        raise WsRejected(WS_NOT_FOUND)
+    role = project_role(db, doc.project_id, ctx.user)
+    if role is None:
+        raise WsRejected(WS_FORBIDDEN)
+    return ctx.user, doc, role
+
+
+def ws_handshake(token: str | None, doc_id: str) -> dict:
+    """握手鉴权，返回连接信息（§8 从 Cookie 读会话）。"""
+    with SessionLocal() as db:
+        user, _doc, role = _ws_access(db, token, doc_id)
+        return {"userId": user.id, "name": user.name,
+                "avatarColor": avatar_color_for(user),
+                "editing": False,
+                "readonly": not has_role(role, "EDITOR")}
+
+
+def ws_save(token: str | None, doc_id: str, content: str, base_version: int) -> dict:
+    """保存一条内容（含逐条权限复查）。
+
+    归档空间的读与 presence 不受影响，但 content 写入必须在写库前拒绝：
+    以 4403 关闭（与无编辑权限同档），不能让它靠已建立的 WS 连接穿透写守卫。
+    """
+    with SessionLocal() as db:
+        user, doc, role = _ws_access(db, token, doc_id)
+        if not has_role(role, "EDITOR"):
+            raise WsRejected(WS_FORBIDDEN)
+        if space_archived(db, doc.project_id):
+            raise WsRejected(WS_FORBIDDEN)
+        # 版本快照与保留策略与 REST 共用同一实现（save_doc_content）；
+        # WS 与 REST 只是传输方式，不是两种成因，所以 kind 用默认的 "save"
+        changed, version = save_doc_content(db, doc, content, user.id,
+                                            base_version=base_version)
+        db.commit()
+        return {"version": version, "changed": changed, "byName": user.name}
+
+
+def presence_users(conns) -> list[dict]:
+    """presence 广播的载荷形状（连接对象仍由路由持有）。"""
+    return [{"userId": c["userId"], "name": c["name"], "editing": c["editing"],
+             "avatarColor": c["avatarColor"]} for c in conns]
 
 
 def resolve_base_version(ctx: AuthContext, payload: dict, *,

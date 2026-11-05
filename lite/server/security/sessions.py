@@ -5,14 +5,13 @@ import secrets
 import time
 from datetime import timedelta
 
-from fastapi import Request, Response
+from fastapi import Response
 from sqlalchemy.orm import Session as DbSession
 
 import config
 import throttle
 from db import utcnow
 from errors import TOO_MANY_ATTEMPTS, err
-from http_util import client_ip, client_ua
 from models import AuthSession, LoginEvent, Pat, User
 from security.passwords import dummy_hash, verify_password
 
@@ -88,11 +87,10 @@ def _throttle_subject(policy: throttle.Policy, ident: str, ip: str) -> str:
     return ip if policy.subject == "client_ip" else ident
 
 
-def verify_credentials(request: Request, db: DbSession, *, ident: str, password: str,
-                       user: User | None,
+def verify_credentials(db: DbSession, *, ident: str, password: str,
+                       user: User | None, ip: str = "", ua: str = "",
                        policies: tuple[throttle.Policy, ...] = LOGIN_POLICIES) -> bool:
     """冷却检查、恒定耗时校验、失败计数与登录审计的唯一入口。"""
-    ip, ua = client_ip(request), client_ua(request)
     for p in policies:
         lock = throttle.locked(db, p, _throttle_subject(p, ident, ip))
         if lock:

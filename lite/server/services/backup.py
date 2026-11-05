@@ -39,7 +39,10 @@ from pathlib import Path
 import models
 import config
 import schema
-from db import utcnow
+from db import release_db, utcnow
+from errors import CONFLICT, VALIDATION, err
+from services.files import (MAX_UPLOAD_BYTES, MAX_UPLOAD_MB, chunked_file,
+                            raise_for_body_status, save_request_body)
 from storage import DB_PATH, FILES_DIR, disk_free_bytes, storage_basename
 from config import DATA_DIR
 
@@ -217,6 +220,26 @@ def build_archive() -> tuple[Path, int, dict]:
         part.unlink(missing_ok=True)
     return final, final.stat().st_size, {"filesIncluded": included,
                                         "filesMissing": len(missing)}
+
+
+def build_download_archive() -> tuple[Path, int]:
+    """供下载端点使用：在锁内生成一次归档，返回 (路径, 字节数)。"""
+    if not BACKUP_LOCK.acquire(timeout=300):
+        err(409, CONFLICT, "另一轮备份正在进行,请稍后再试")
+    try:
+        archive, size, _stats = build_archive()
+    finally:
+        BACKUP_LOCK.release()
+    return archive, size
+
+
+def stream_archive(archive: Path):
+    """流式回吐生成的归档，结束或中断都清理暂存文件。"""
+    try:
+        with open(archive, "rb") as fh:
+            yield from chunked_file(fh)
+    finally:
+        archive.unlink(missing_ok=True)
 
 
 def verify_archive(path: Path) -> tuple[bool, str]:
@@ -619,6 +642,27 @@ def _db_counts(dbpath: Path) -> dict:
     except sqlite3.Error:
         pass
     return out
+
+
+async def receive_restore_upload(db, stream, declared_bytes: int = 0) -> dict:
+    """接收恢复包：先校验待生效状态，再把请求体流式落到暂存区并校验。
+
+    路由只负责把 request.stream() 传进来；数据库会话在长 I/O 前归还。
+    """
+    st = restore_status()
+    if st.get("armed"):
+        err(409, CONFLICT, "已有一份待重启生效的备份。请先取消它,或重启服务使其生效后再上传")
+    if declared_bytes and declared_bytes > MAX_UPLOAD_BYTES:
+        err(400, VALIDATION, f"备份过大(上限 {MAX_UPLOAD_MB}MB)")
+    release_db(db)
+    STAGING_DIR.mkdir(parents=True, exist_ok=True)
+    part = STAGING_UPLOAD.with_name("restore-upload.zip.part")
+    status, _total = await save_request_body(stream, part, MAX_UPLOAD_BYTES)
+    raise_for_body_status(status, kind="备份")
+    info, msg = stage_upload(part)
+    if not info:
+        err(400, VALIDATION, msg)
+    return {"ok": True, "info": info}
 
 
 def stage_upload(part: Path) -> tuple[dict | None, str]:

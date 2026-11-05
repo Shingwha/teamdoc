@@ -3,56 +3,35 @@ from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session as DbSession
 
 from db import get_db
-from errors import FORBIDDEN, UNAUTHORIZED, bad_request, err
-from http_util import bool_field, client_ip, client_ua, str_field
+from http_util import client_ip, client_ua
 from ids import IdPath
-from models import User
 from security import sessions
 from security.context import AuthContext, current_user, pat_write_guard
-from security.passwords import check_password_strength
 from serialize import user_json
-from services import users
+from services import auth, users
 
 router = APIRouter(dependencies=[Depends(pat_write_guard)])
 
 
 @router.get("/api/auth/status")
 def auth_status(db: DbSession = Depends(get_db)):
-    try:
-        return {"bootstrapped": db.query(User).count() > 0, "dbReady": True}
-    except Exception:
-        return {"bootstrapped": False, "dbReady": False}
+    return auth.bootstrap_status(db)
 
 
 @router.post("/api/auth/bootstrap")
 def bootstrap(payload: dict, request: Request, response: Response,
               db: DbSession = Depends(get_db)):
-    if db.query(User).count() > 0:
-        err(403, FORBIDDEN, "系统已初始化")
-    email, name, password = users.validated_user_fields(payload)
-    user = users.create_user_with_personal_space(db, email, name, password, True)
-    ip, ua = client_ip(request), client_ua(request)
-    token = sessions.create_session(db, user.id, ip=ip, ua=ua)
+    user, token = auth.bootstrap(db, payload,
+                                 ip=client_ip(request), ua=client_ua(request))
     sessions.set_session_cookie(response, token)
-    sessions.record_login_event(db, user=user, email=email, ip=ip, ua=ua, result="ok")
     return {"user": user_json(user)}
 
 
 @router.post("/api/auth/login")
 def login(payload: dict, request: Request, response: Response,
           db: DbSession = Depends(get_db)):
-    email = str_field(payload, "email", 255, required=True).lower()
-    password = payload.get("password")
-    if not isinstance(password, str):
-        bad_request("password 不能为空")
-    user = db.query(User).filter_by(email=email).first()
-    if not sessions.verify_credentials(request, db, ident=email, password=password, user=user):
-        err(401, UNAUTHORIZED, sessions.mismatch_message(db, email))
-    if user.is_disabled:
-        err(401, UNAUTHORIZED, "账号已被禁用")
-    ttl = sessions.REMEMBER_TTL if bool_field(payload, "remember") else sessions.SESSION_TTL
-    token = sessions.create_session(db, user.id, ttl,
-                                    ip=client_ip(request), ua=client_ua(request))
+    user, token, ttl = auth.login(db, payload,
+                                  ip=client_ip(request), ua=client_ua(request))
     sessions.set_session_cookie(response, token, ttl)
     return {"user": user_json(user)}
 
@@ -84,15 +63,8 @@ def patch_me(payload: dict, ctx: AuthContext = Depends(current_user),
 def change_my_password(payload: dict, request: Request,
                        ctx: AuthContext = Depends(current_user),
                        db: DbSession = Depends(get_db)):
-    old, new = payload.get("oldPassword"), payload.get("newPassword")
-    if not isinstance(old, str) or not isinstance(new, str):
-        bad_request("oldPassword/newPassword 必须为字符串")
-    if not sessions.verify_credentials(request, db, ident=ctx.user.email, password=old,
-                                       user=ctx.user,
-                                       policies=(sessions.LOGIN_ACCOUNT_POLICY,)):
-        err(403, FORBIDDEN, "原密码错误")
-    check_password_strength(new)
-    return users.change_password(db, ctx, new)
+    return auth.change_password(db, ctx, payload,
+                                ip=client_ip(request), ua=client_ua(request))
 
 
 @router.get("/api/auth/sessions")

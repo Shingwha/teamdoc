@@ -22,13 +22,10 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
-from db import SessionLocal, is_live
 from ids import IdPath
-from models import Doc
-from security.context import has_role, project_role, session_context, space_archived
 from security.sessions import SESSION_COOKIE
-from serialize import avatar_color_for
-from services.docs import ContentConflict, save_doc_content, str_content
+from services.docs import (ContentConflict, WsRejected, presence_users, str_content,
+                           ws_handshake, ws_save)
 
 logger = logging.getLogger("teamdoc.ws")
 
@@ -36,18 +33,6 @@ router = APIRouter()
 
 # doc_id -> [{ws, userId, name, avatarColor, editing, readonly}]
 POOL: dict[str, list[dict]] = {}
-
-
-class _WsClose(Exception):
-    """要求以指定关闭码结束连接(会话失效 4401 / 无权限 4403 / 文档没了 4404)。
-
-    用异常而不是返回值:数据库函数就能按"先复核、再干活"的顺序平铺直叙,
-    不必把每个失败分支都编码进返回类型。
-    """
-
-    def __init__(self, code: int):
-        super().__init__(str(code))
-        self.code = code
 
 
 async def _broadcast(doc_id: str, message: dict, exclude: dict | None = None):
@@ -66,57 +51,7 @@ async def _broadcast(doc_id: str, message: dict, exclude: dict | None = None):
 
 
 async def _broadcast_presence(doc_id: str):
-    users = [{"userId": c["userId"], "name": c["name"], "editing": c["editing"],
-              "avatarColor": c["avatarColor"]} for c in POOL.get(doc_id, [])]
-    await _broadcast(doc_id, {"type": "presence", "users": users})
-
-
-def _access(db, token: str | None, doc_id: str):
-    """取当前用户与文档并确认仍可访问;返回 (user, doc, role)。
-
-    握手与每条消息都走这里:会话失效抛 4401、文档被删抛 4404、不再是成员抛 4403。
-    会话判定复用 security.context.session_context(含滑动续期),不另写一份。
-    """
-    ctx = session_context(db, token)
-    if ctx is None:
-        raise _WsClose(4401)
-    doc = db.get(Doc, doc_id)
-    if not is_live(doc):
-        raise _WsClose(4404)
-    role = project_role(db, doc.project_id, ctx.user)
-    if role is None:
-        raise _WsClose(4403)
-    return ctx.user, doc, role
-
-
-def _handshake(token: str | None, doc_id: str) -> dict:
-    """Worker 线程:握手鉴权,返回连接信息(§8 从 Cookie 读会话)。"""
-    with SessionLocal() as db:
-        user, _doc, role = _access(db, token, doc_id)
-        return {"userId": user.id, "name": user.name,
-                "avatarColor": avatar_color_for(user),
-                "editing": False,
-                "readonly": not has_role(role, "EDITOR")}
-
-
-def _save_content(token: str | None, doc_id: str, content: str, base_version: int):
-    """Worker 线程:保存一条内容(含逐条权限复查),返回 (version, changed, 用户名)。
-
-    归档空间的读与 presence 不受影响，但 content 写入必须在写库前拒绝：
-    以 4403 关闭（与无编辑权限同档），不能让它靠已建立的 WS 连接穿透写守卫。
-    """
-    with SessionLocal() as db:
-        user, doc, role = _access(db, token, doc_id)
-        if not has_role(role, "EDITOR"):
-            raise _WsClose(4403)
-        if space_archived(db, doc.project_id):
-            raise _WsClose(4403)
-        # 版本快照与保留策略与 REST 共用同一实现(services.docs.save_doc_content);
-        # WS 与 REST 只是传输方式,不是两种成因,所以 kind 用默认的"save"
-        changed, version = save_doc_content(db, doc, content, user.id,
-                                            base_version=base_version)
-        db.commit()
-        return version, changed, user.name
+    await _broadcast(doc_id, {"type": "presence", "users": presence_users(POOL.get(doc_id, []))})
 
 
 @router.websocket("/ws/docs/{doc_id}")
@@ -126,8 +61,8 @@ async def doc_ws(websocket: WebSocket, doc_id: IdPath):
     try:
         token = websocket.cookies.get(SESSION_COOKIE)
         try:
-            info = await run_in_threadpool(_handshake, token, doc_id)
-        except _WsClose as exc:
+            info = await run_in_threadpool(ws_handshake, token, doc_id)
+        except WsRejected as exc:
             await websocket.close(code=exc.code)
             return
         conn = {"ws": websocket, **info}
@@ -161,8 +96,8 @@ async def doc_ws(websocket: WebSocket, doc_id: IdPath):
                                    doc_id, conn["userId"])
                     continue
                 try:
-                    version, changed, by_name = await run_in_threadpool(
-                        _save_content, token, doc_id, content, base_version)
+                    saved = await run_in_threadpool(
+                        ws_save, token, doc_id, content, base_version)
                 except ContentConflict as c:
                     # 只回发送者:其他人根本没被改动,收到 conflict 只会莫名其妙。
                     # 用 continue 而不是关闭连接 —— 冲突是可恢复的正常状态
@@ -173,11 +108,13 @@ async def doc_ws(websocket: WebSocket, doc_id: IdPath):
                     await websocket.send_json({"type": "conflict", "currentVersion": c.version,
                                                "currentContent": c.content, "by": c.by_name})
                     continue
-                except _WsClose as exc:
+                except WsRejected as exc:
                     logger.info("WS 关闭 doc=%s user=%s code=%s",
                                 doc_id, conn["userId"], exc.code)
                     await websocket.close(code=exc.code)
                     return
+                version, changed, by_name = (saved["version"], saved["changed"],
+                                             saved["byName"])
                 await websocket.send_json({"type": "saved", "version": version})
                 if changed:
                     await _broadcast(doc_id, {"type": "remote", "content": content,
