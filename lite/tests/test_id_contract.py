@@ -105,15 +105,6 @@ def test_refs_ignores_non_id_candidates():
         "带项目 id 的两段式不是本契约的形态"
 
 
-def test_refs_generation_round_trips():
-    fid, did = ids.new_id(), ids.new_id()
-    assert refs.doc_ids_in(f"[@x]({refs.doc_ref(did)})") == {did}
-    assert refs.file_ids_in(f"[@x]({refs.file_ref(fid)})") == {fid}
-    assert refs.download_url(fid) == f"/api/files/{fid}/download"
-    assert refs.download_url(fid, True) == f"/api/files/{fid}/download?inline=1"
-    assert refs.file_ids_in(f"[@x]({refs.download_url(fid, True)})") == {fid}
-
-
 def test_sql_prefilter_is_not_stricter_than_parser():
     """粗筛不能比精确判定更严:否则"正文里明明有引用"的行在 SQL 阶段就被滤掉。"""
     fid, did = ids.new_id(), ids.new_id()

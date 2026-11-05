@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session as DbSession
 
 from db import release_db
-from deps import (IdPath, current_user, get_db, pat_write_guard,
+from deps import (IdPath, current_user, declared_bytes, get_db, pat_write_guard,
                   require_project_role, require_role)
 from http_util import clamp_int
 from media import can_inline, guess_mime
@@ -19,13 +19,6 @@ router = APIRouter(dependencies=[Depends(pat_write_guard)])
 FILE_VIEW = require_role(File, "文件", "VIEWER", path_param="file_id")
 FILE_EDIT = require_role(File, "文件", "EDITOR", path_param="file_id", write=True)
 FOLDER_EDIT = require_role(Folder, "文件夹", "EDITOR", path_param="folder_id", write=True)
-
-
-def _declared_bytes(request: Request) -> int:
-    try:
-        return int(request.headers.get("content-length") or 0)
-    except ValueError:
-        return 0
 
 
 def _file_response(db: DbSession, name: str, path, inline: str):
@@ -81,7 +74,7 @@ async def upload_file(request: Request, projectId: str = "", folderId: str = "",
                                 doc_id=docId, name=name, name_mode=name_mode,
                                 version_of=version_of)
     f = await files.store_upload(db, ctx, plan, request.stream(),
-                                 _declared_bytes(request))
+                                 declared_bytes(request))
     return file_json(f)
 
 
@@ -123,7 +116,7 @@ async def upload_version(file_id: IdPath, request: Request, name: str = "",
                          db: DbSession = Depends(get_db)):
     plan = files.prepare_upload(db, ctx, name=name, version_of=file_id, note=note)
     f = await files.store_upload(db, ctx, plan, request.stream(),
-                                 _declared_bytes(request))
+                                 declared_bytes(request))
     return file_json(f)
 
 

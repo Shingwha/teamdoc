@@ -4,9 +4,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session as DbSession
 
 from db import SessionLocal, is_live, utcnow
-from errors import CONFLICT, NOT_FOUND, bad_request, err
+from errors import NOT_FOUND, bad_request, err
 from http_util import id_field, int_field, opt_id, query_id, str_field
-from models import Doc, DocVersion, File, Project, User
+from models import Doc, DocVersion, File, Project
 from security.context import (Actor, ensure_move_allowed, get_project_or_404,
                               has_role, project_role, session_context, space_archived,
                               validate_parent)
@@ -17,7 +17,6 @@ from services.users import user_names
 from treeutil import build_tree, collect_subtree, location_json, next_sort
 
 VERSION_MERGE_MINUTES = config.VERSION_MERGE_MINUTES
-VERSION_KINDS = ("save", "restore")
 _DAY = 86400
 _HOUR = 3600
 
@@ -41,13 +40,6 @@ class WsRejected(Exception):
     def __init__(self, code: int):
         super().__init__(str(code))
         self.code = code
-
-
-def _user_name(db: DbSession, user_id: str | None) -> str:
-    if not user_id:
-        return ""
-    u = db.get(User, user_id)
-    return u.name if u else ""
 
 
 def str_content(payload: dict) -> str | None:
@@ -192,7 +184,8 @@ def save_doc_content(db: DbSession, doc: Doc, content: str, user_id: str,
     if doc.content == content:
         return False, doc.version
     if base_version is not None and base_version != doc.version:
-        raise ContentConflict(doc.version, doc.content, _user_name(db, doc.updated_by))
+        raise ContentConflict(doc.version, doc.content,
+                              user_names(db, [doc.updated_by]).get(doc.updated_by, ""))
     now = utcnow()
     last = (db.query(DocVersion).filter_by(doc_id=doc.id)
             .order_by(DocVersion.created_at.desc(), DocVersion.id.desc()).first())

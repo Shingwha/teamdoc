@@ -58,18 +58,6 @@ def env_float(name: str, default: float, *, min: float | None = None,
     return value
 
 
-def env_bool(name: str, default: bool) -> bool:
-    raw = _raw(name)
-    if raw is None:
-        return default
-    low = raw.lower()
-    if low in ("1", "true", "yes", "on"):
-        return True
-    if low in ("0", "false", "no", "off"):
-        return False
-    raise RuntimeError(f"环境变量 {name}={raw!r} 不是布尔值(true/false/1/0/yes/no/on/off)")
-
-
 def env_list(name: str, default: list[str]) -> list[str]:
     """逗号分隔的列表。刻意不用 os.pathsep:Windows 的路径分隔符是 ";" 而盘符
     自带冒号("D:\\"),按 pathsep 切会把盘符切坏,而逗号几乎不会出现在路径里。"""

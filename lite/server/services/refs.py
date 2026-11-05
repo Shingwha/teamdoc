@@ -1,4 +1,4 @@
-"""引用契约的**唯一真相源**(服务端半边;前端半边是 lite/web/js/ref.js)。
+"""引用语法的**唯一解析真相源**(服务端半边;前端生成侧在 lite/web/js/ref.js)。
 
 正文里指向站内资源的引用有两种形态,都是普通 Markdown 链接:
 
@@ -30,21 +30,6 @@ FILE_PREFIX = "teamdoc://file/"
 _DOWNLOAD_RE = re.compile(r"/api/files/([^/?#\s)]+)/download")
 _DOC_CHIP_RE = re.compile(re.escape(DOC_PREFIX) + r"([^)\s]+)")
 _FILE_CHIP_RE = re.compile(re.escape(FILE_PREFIX) + r"([^)\s]+)")
-
-
-def doc_ref(doc_id: str) -> str:
-    """文档引用的规范形态(生成侧只有这一处,前端对应 Ref.docChip)。"""
-    return f"{DOC_PREFIX}{doc_id}"
-
-
-def file_ref(file_id: str) -> str:
-    """文件引用的规范形态(前端对应 Ref.fileChip)。"""
-    return f"{FILE_PREFIX}{file_id}"
-
-
-def download_url(file_id: str, inline: bool = False) -> str:
-    """下载地址的规范形态(前端对应 Ref.downloadUrl)。"""
-    return f"/api/files/{file_id}/download" + ("?inline=1" if inline else "")
 
 
 def file_ids_in(content: str) -> set[str]:

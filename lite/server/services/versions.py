@@ -28,10 +28,11 @@ def normalize_note(note) -> str | None:
     return text or None
 
 
-def record_change(db: DbSession, file: File, op: str = "upsert", *, at=None) -> FileChange:
+def record_change(db: DbSession, file: File, op: str = "upsert", *, at=None,
+                  space_id: str | None = None) -> FileChange:
     if op not in ("upsert", "delete"):
         raise ValueError(f"未知文件变更类型: {op}")
-    change = FileChange(file_id=file.id, space_id=file.project_id, op=op,
+    change = FileChange(file_id=file.id, space_id=space_id or file.project_id, op=op,
                         at=at or utcnow())
     db.add(change)
     return change

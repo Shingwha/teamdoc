@@ -631,10 +631,9 @@ def _db_counts(dbpath: Path) -> dict:
     try:
         conn = sqlite3.connect(f"file:{dbpath}?mode=ro", uri=True)
         try:
-            for key, table in (("users", "users"), ("projects", "projects"),
-                               ("docs", "docs"), ("files", "files")):
+            for table in out:
                 try:
-                    out[key] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    out[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
                 except sqlite3.Error:
                     pass
         finally:

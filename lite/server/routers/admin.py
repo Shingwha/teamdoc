@@ -6,9 +6,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as DbSession
 
 from db import release_db
-from deps import IdPath, get_db, pat_write_guard, require_admin
+from deps import IdPath, declared_bytes, get_db, pat_write_guard, require_admin
 from routers import ws as ws_mod
-from errors import CONFLICT, VALIDATION, err
+from errors import VALIDATION, err
 from http_util import clamp_int, query_id
 from security.context import Actor
 from services import audit, backup, users
@@ -108,11 +108,8 @@ def restore_status(ctx: Actor = Depends(require_admin)):
 @router.post("/api/admin/restore/upload")
 async def restore_upload(request: Request, ctx: Actor = Depends(require_admin),
                          db: DbSession = Depends(get_db)):
-    try:
-        declared = int(request.headers.get("content-length") or 0)
-    except ValueError:
-        declared = 0
-    return await backup.receive_restore_upload(db, request.stream(), declared)
+    return await backup.receive_restore_upload(db, request.stream(),
+                                               declared_bytes(request))
 
 
 @router.post("/api/admin/restore/arm")

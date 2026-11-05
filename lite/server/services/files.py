@@ -12,14 +12,14 @@ from sqlalchemy.orm import Session as DbSession
 import config
 from db import release_db, utcnow
 from errors import CONFLICT, NAME_EXISTS, NOT_FOUND, VALIDATION, bad_request, err
-from http_util import id_csv_field, opt_int, query_id, str_field
-from models import Doc, File, FileChange, FileVersion, Folder
+from http_util import id_csv_field, id_field, opt_id, opt_int, query_id, str_field
+from models import Doc, File, FileVersion, Folder
 from security.context import (Actor, ensure_move_allowed, ensure_project_role,
                               get_project_or_404, load_live, validate_parent)
 from serialize import file_json, folder_json, historical_file_json, iso
 from services import refs, versions
-from services.users import user_map
-from storage import (FILES_DIR, INFLIGHT_STORAGE, disk_free_bytes, disk_total_bytes,
+from services.users import user_map, user_names
+from storage import (INFLIGHT_STORAGE, disk_free_bytes, disk_total_bytes,
                      file_abspath, unlink_quiet)
 from treeutil import build_tree, collect_subtree, location_json
 
@@ -138,10 +138,7 @@ def _user_name_conflict(existing: set, existing_dirs: set, name: str, kind: str)
 
 
 def _name_exists(db: DbSession, existing: File):
-    updated_by_name = ""
-    if existing.updated_by:
-        author = user_map(db, [existing.updated_by]).get(existing.updated_by)
-        updated_by_name = author.name if author else ""
+    updated_by_name = user_names(db, [existing.updated_by]).get(existing.updated_by, "")
     err(409, NAME_EXISTS, f"同目录下已有同名文件「{existing.name}」",
         extra={"existing": {"id": existing.id, "name": existing.name,
                             "size": existing.size, "updatedAt": iso(existing.updated_at),
@@ -162,7 +159,6 @@ def _attach_folder(db: DbSession, project_id: str) -> str:
 
 def create_folder(db: DbSession, payload: dict, ctx: Actor) -> dict:
     name = str_field(payload, "name", 100, required=True)
-    from http_util import id_field, opt_id
     project_id = id_field(payload, "projectId", required=True)
     parent_id = opt_id(payload.get("parentId"))
     get_project_or_404(db, project_id)
@@ -189,7 +185,6 @@ def rename_folder(db: DbSession, folder: Folder, payload: dict) -> dict:
 
 
 def move_folder(db: DbSession, folder: Folder, payload: dict, ctx: Actor) -> dict:
-    from http_util import id_field, opt_id
     target_id = id_field(payload, "projectId", required=True)
     src_id = folder.project_id
     ensure_move_allowed(db, ctx, src_id, target_id)
@@ -201,7 +196,7 @@ def move_folder(db: DbSession, folder: Folder, payload: dict, ctx: Actor) -> dic
     if target_id != src_id:
         now = utcnow()
         for f in affected:
-            db.add(FileChange(file_id=f.id, space_id=src_id, op="delete", at=now))
+            versions.record_change(db, f, "delete", at=now, space_id=src_id)
         folder.project_id = target_id
         db.query(Folder).filter(Folder.id.in_(ids)).update(
             {"project_id": target_id}, synchronize_session=False)
@@ -395,7 +390,6 @@ def folder_tree(db: DbSession, project_id: str) -> list:
 
 
 def move_file(db: DbSession, f: File, payload: dict, ctx: Actor) -> dict:
-    from http_util import id_field, opt_id
     target_id = id_field(payload, "projectId", required=True)
     folder_id = opt_id(payload.get("folderId"))
     src_id = f.project_id
@@ -403,7 +397,7 @@ def move_file(db: DbSession, f: File, payload: dict, ctx: Actor) -> dict:
     validate_parent(db, Folder, folder_id, target_id, label="目标文件夹")
     now = utcnow()
     if target_id != src_id:
-        db.add(FileChange(file_id=f.id, space_id=src_id, op="delete", at=now))
+        versions.record_change(db, f, "delete", at=now, space_id=src_id)
     f.project_id = target_id
     f.folder_id = folder_id
     f.updated_by = ctx.user.id
