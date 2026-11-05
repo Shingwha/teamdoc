@@ -74,8 +74,9 @@ W4-a..d 文件范围不相交，可并行（最后一批共享工作区波次）
 - W5 新增 `test_design_scale_is_converged`（精确令牌清单）；属 W7 测试收敛评估项，若判定为脆弱静态断言则删除。
 - W6：✅ 已合并（`fe0bb5b`，分支 `wave/w6-backend-cleanup`，6 个提交）。路由薄化（auth/admin/ws 业务下沉）；`services/**` 到 FastAPI 的唯一链路只剩 `errors`；`deps.py` 承接请求依赖；合并重复助手、删除 0 引用符号；后端测试 186 → 183 选中（178 passed / 1 skipped / 1 failed 基线）；slow 3 passed。
 - W7：✅ 已合并（`f198dd9`，分支 `wave/w7-frontend-cleanup`，5 个提交）。合并角色/日期/偏好/活跃时间原语；删除 `views/recent.js`、0 引用导出、死 CSS；测试选中数 180 → 173（**171 passed**，删除精确令牌断言与字符串式驱动测试，改为 1 条 `driveBody` 行为巡检）；修复 `#/p/{pid}/settings` 的未定义引用。
-- W8：✅ 终验完成。全量快速组 **171 passed, 1 skipped, 1 failed（仅登记 Mermaid 基线）, 3 deselected**（110.12s，W7 合并后）；slow **3 passed**；浏览器核心路径组 **18 passed**（visual sweep / editor / admin sections / join drill / doc move drill / drive versions / page assets）。测试选中数 **186 → 173**（W6 删 3、W7 删 7）。W5/W6/W7 worktree 已删除，分支 `wave/w5-polish`、`wave/w6-backend-cleanup`、`wave/w7-frontend-cleanup` 保留；主检出 `refactor/teamdoc-v1.4` 工作区干净。W8 小修：首页最近文档副行补作者（`updatedByName`）。
-- 遗留（不在本次范围）：`test_markdown_diagram` 的 Mermaid 切主题重画失败为登记基线；归档空间是否排除搜索、配额硬限制为后续产品决策；空间设置抽屉的转让/归档真实点击未逐项流水（接口与静态契约已验）。
+- W8：✅ 终验完成。全量快速组 **171 passed, 1 skipped, 1 failed（登记 Mermaid 基线）, 3 deselected**；slow **3 passed**；浏览器核心路径组 **18 passed**（visual sweep / editor / admin sections / join drill / doc move drill / drive versions / page assets）。测试选中数 **186 → 173**（W6 删 3、W7 删 7）。W5/W6/W7 worktree 已删除，分支保留；主检出 `refactor/teamdoc-v1.4` 工作区干净。W8 小修：首页最近文档副行补作者（`updatedByName`）。
+- W9：✅ 已合并（`f05dc67`，分支 `wave/w9-mermaid-fix`）。Mermaid 基线假红根因是浏览器测试共用默认 Chrome profile、localStorage 残留深色，`setMode('dark')` 成为无变化调用；产品重画链路正常。修复为每次 Chrome 调用独立临时 `--user-data-dir` + 测试强制浅色起点。合并后全量 **172 passed, 1 skipped, 0 failed, 3 deselected**（107s），slow 3 passed。
+- 遗留（需产品/用户决策）：归档空间默认是否排除搜索；配额是否硬限制上传及计量口径；空间设置抽屉的转让/归档真实点击由用户自查。
 
 ## 接口索引
 见 `ref/interfaces.md`。仓库地图见 `ref/repo-map.md`。实际交付以代码、测试和 handoff 为准。
