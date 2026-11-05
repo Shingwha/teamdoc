@@ -10,8 +10,7 @@ html, body { height: 100%; }
 body {
   margin: 0;
   font-family: var(--font);
-  font-size: var(--fs-body);
-  line-height: 1.6;
+  font-size: var(--fs-body); line-height: var(--lh-body);
   color: var(--md-on-surface);
   background: var(--md-surface);
   -webkit-font-smoothing: antialiased;
@@ -27,6 +26,9 @@ img { max-width: 100%; border-radius: var(--radius-s); }
 
 button { font-family: inherit; }
 
+/* 图标字形以 line-height:1 占满自身字号:字号缩放不再牵扯行盒高度 */
+i[class^="ri-"], i[class*=" ri-"] { line-height: 1; }
+
 /* 复选框强调色全站一致(此前 components/editor 各写一份,深浅主题下会漂移) */
 input[type="checkbox"] { accent-color: var(--md-primary); }
 
@@ -35,7 +37,7 @@ input[type="checkbox"] { accent-color: var(--md-primary); }
 /* 滚动条 */
 ::-webkit-scrollbar { width: var(--sp-2-5); height: var(--sp-2-5); }
 ::-webkit-scrollbar-thumb {
-  background: var(--md-surface-container-highest);
+  background: var(--md-outline-variant);
   border-radius: var(--radius-full);
   border: 2px solid transparent;
   background-clip: content-box;
@@ -52,7 +54,7 @@ input[type="checkbox"] { accent-color: var(--md-primary); }
 
 /* 文本工具类 */
 .muted { color: var(--md-on-surface-variant); }
-.small { font-size: var(--fs-label); }
+.small { font-size: var(--fs-caption); line-height: var(--lh-caption); }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fw-semi { font-weight: var(--fw-semi); }
 
