@@ -107,3 +107,9 @@ W1 已完成并回写：上述文件接口与真实代码一致；`docId` 附件
 - 新增 `Endpoints.notifications()`、`notificationsRead()`、`notificationsReadAll()`、`adminPats(params)`；`fileVersionUpload(id,name,note)`。
 - 空间切换器逐空间设置入口调用 `SpaceSettings.open(projOrNull, pid, tab)`（签名不变）；`App.spaces` 项含 `myRole`。
 - 命令面板用户捷径改为 `#/admin/users?user={id}`；管理用户区读 `user` 打开详情，读 `q` 过滤列表。
+
+## W6/W7 分层与前端收口（最终）
+- FastAPI 适配层集中在 `deps.py`（get_db/鉴权/请求头/IdPath）；`security/context.py` 只含纯业务 `Actor` 与权限判定；`services/**` 触达 FastAPI 的唯一链路是 `errors.py`。
+- 路由只做参数解析 → service → serialize；登录/初始化、恢复包 I/O、WS 保存/presence 已下沉 service。
+- 前端已删除 `views/recent.js` 与 `#/search`、`#/discover` 路由；搜索只走命令面板，发现只在空间切换器「发现空间」页签。
+- 测试保留口径：行为/HTTP/浏览器契约优先；静态测试只保留架构契约（layout/render/page assets/frontend refs），不再保留精确令牌清单或实现字符串断言。
