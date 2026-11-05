@@ -30,6 +30,11 @@ class Actor:
 
 
 def session_context(db: DbSession, token: str | None) -> Actor | None:
+    """解析会话并按需滑动续期。
+
+    续期是一次独立提交：它是会话自身的过期语义，不属于任何业务写路径；业务代码
+    不应把“请求里有没有发生滑动续期”混进自己的事务边界。
+    """
     if not token:
         return None
     sess = db.get(AuthSession, token)

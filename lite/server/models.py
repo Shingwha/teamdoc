@@ -185,6 +185,10 @@ class FileVersion(Base):
 class FileChange(Base):
     __tablename__ = "file_changes"
     __table_args__ = (Index("ix_file_changes_space_seq", "space_id", "seq"),)
+    # seq 是 SQLite 的 INTEGER PRIMARY KEY（rowid 别名），刻意不启用 SQL AUTOINCREMENT：
+    # 变更行只在空间被彻底删除时清理，而 rowid 分配是“现有最大 +1”。即便删除过最大行，
+    # 复用的号也必然大于本空间仍存在的最大 seq；游标按 space_id 过滤且 since 只取本空间
+    # 已见的最大 seq，因此单调性成立。改 AUTOINCREMENT 需要重建表，不为理论风险引入迁移。
     seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     file_id: Mapped[str] = mapped_column(String(ID_LEN), index=True)
     space_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)

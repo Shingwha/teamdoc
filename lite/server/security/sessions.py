@@ -46,6 +46,7 @@ def pat_hash(token: str) -> str:
 
 def create_session(db: DbSession, user_id: str, ttl: int = SESSION_TTL, *,
                    ip: str = "", ua: str = "") -> str:
+    """签发会话并独立提交：认证凭据的生命周期不等同于业务写事务。"""
     token = secrets.token_hex(32)
     now = utcnow()
     db.add(AuthSession(token=token, user_id=user_id, created_at=now,

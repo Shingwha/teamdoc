@@ -92,6 +92,7 @@ def authenticate(request: Request, db: DbSession = Depends(get_db)) -> Actor | N
             now = utcnow()
             if pat.last_used_at is None or (now - pat.last_used_at).total_seconds() > 60:
                 pat.last_used_at = now
+                # 凭据“最近使用时间”是安全审计语义，独立于本次业务写事务提交。
                 db.commit()
             return Actor(user=user, via="pat", scopes=pat.scopes.split(","), pat_id=pat.id)
     return session_context(db, request.cookies.get(sessions.SESSION_COOKIE))
