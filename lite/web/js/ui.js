@@ -1,5 +1,7 @@
 // ui.js — 自研组件库与通用工具(全部视图复用,禁止重复造轮子)
-// 工具:esc / debounce / fmtSize / fmtDate / copyText / roleRank / roleLabel / icon
+// 工具:esc / debounce / parseDate / fmtSize / fmtDate / fmtDateShort / fmtWhen /
+//       lastActiveText / copyText / roleRank / roleLabel / ROLES / roleOptions /
+//       pref(get/set/getJSON/setJSON) / idOf / icon
 // 浮层:toast / err / modal / confirmDialog / inputDialog / formModal / dropdownMenu
 // 展示:avatar / spinner / loadingRow / emptyState / badge / banner / card / idText
 // 布局:pageHead / toolbar / seg / listRow / tableHead / tableRow / btn / iconBtn /
