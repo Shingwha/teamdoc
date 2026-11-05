@@ -28,6 +28,8 @@
 | W6 | 后端整体重构清理：合并重复、删死代码、收敛服务边界、测试去重去脆 | W5 | `lite/server/**`、后端测试 |
 | W7 | 前端整体重构清理：共享原语、删无效模块/CSS、测试去重去脆 | W6 | `lite/web/**`、前端测试、ARCHITECTURE |
 | W8 | 终验：全量 + slow + 浏览器核心路径，测试套件最终收敛 | W7 | lead |
+| W10-a | 归档空间搜索：默认排除 + 包含开关 + 结果标记 | W9 | `services/search.py`、`routers/search.py`、`views/palette.js`、新增测试、本波 handoff |
+| W10-b | 空间配额硬限制：物理占用计量 + 上传/新版本/跨空间移动拦截 | W9 | `services/{quota,files,spaces,audit}.py`、`serialize/errors`、空间与后台视图、新增测试、本波 handoff |
 
 第二轮（W4–W5）补齐方案 v1.4 的全部缺口；第三轮（W6–W8）只做重构与清理，不新增能力。测试口径不变：新增测试只守真实行为契约，宁少勿多；清理阶段删除冗余、重复、脆弱的断言。
 
