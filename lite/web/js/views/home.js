@@ -73,7 +73,9 @@ window.Favorites = (function () {
   }
 
   function fmtSub(d) {
-    return UI.esc(UI.fmtDate(d.updatedAt) + (d.projectName ? ' · ' + d.projectName : ''));
+    // 最近文档副行:时间 · 作者 · 空间(作者可能为空的历史文档自动略过)
+    return UI.esc([UI.fmtDate(d.updatedAt), d.updatedByName, d.projectName]
+      .filter(Boolean).join(' · '));
   }
 
   // ==================== 空间首页 ====================
