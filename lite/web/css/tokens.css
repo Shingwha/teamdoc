@@ -41,23 +41,35 @@
 
   /* 列表行高(表格行与弹性列表行各自一套,不混用) */
   --row-h-head: 44px;  /* 表格表头 */
-  --row-h: 52px;       /* 数据表格行 */
+  --row-h: 44px;       /* 数据表格行 / 弹性列表行 */
 
-  /* 字阶:8 档(display/headline/title/subtitle/body/label/caption + prose 正文面) */
+  /* 字阶:8 档,每档与配对行高成对取用(不许只取字号、另写行高)。
+     display 28/34 · headline 22/28 · title-lg 16/24 · title 14/20
+     body 14/22 · prose 16/26 · label 13/18 · caption 12/16
+     prose 是长时间逐行读写的正文面(源码/预览/历史版本/文件预览),与 body 分开:
+     body 是扫读列表的尺寸,改它会连带表格、按钮一起变大。
+     caption 承担原 label(12) 与 xs(11) 两档的次要信息;label 承担原 sm(13)。 */
   --fs-display: 28px;
   --fs-headline: 22px;
-  --fs-title: 16px;
-  --fs-subtitle: 14px;
+  --fs-title-lg: 16px;
+  --fs-title: 14px;
   --fs-body: 14px;
-  --fs-sm: 13px;
-  --fs-label: 12px;
-  --fs-xs: 11px;
-
-  /* 散文面字阶:源码编辑区 / 文档预览 / 历史版本 / 文件预览同一档(16px)。
-     理由:这些都是**长时间逐行读写**的场景,14px 的 --fs-body 是"扫读列表"的尺寸。
-     字号与字面(见下方字体)一起对齐,切换编辑/预览时正文才真的不跳。
-     单独一档而不是改 --fs-body:后者是全站基准,改它会连带列表、表格、按钮一起变大。 */
   --fs-prose: 16px;
+  --fs-label: 13px;
+  --fs-caption: 12px;
+
+  /* 配对行高:与上面 8 档一一对应(默认字号下的行盒像素);prose 用比例以便随个人字号缩放 */
+  --lh-display: 34px;
+  --lh-headline: 28px;
+  --lh-title-lg: 24px;
+  --lh-title: 20px;
+  --lh-body: 22px;
+  --lh-prose: 1.625;   /* 26/16;正文字号可由个人设置调整,行高按比例跟随 */
+  --lh-label: 18px;
+  --lh-caption: 16px;
+
+  /* 编辑器主题(js/editor/theme.js)按此名消费行高;值与 prose 配对行高一致 */
+  --lh-loose: var(--lh-prose);
 
   /* 图标尺寸:与文本字阶分开,不再借 font-size 表达 */
   --icon-s: 16px;
@@ -65,10 +77,7 @@
   --icon-l: 20px;
   --icon-2xl: 48px;
 
-  /* 行高 / 字重 */
-  --lh-tight: 1.3;
-  --lh-normal: 1.6;
-  --lh-loose: 1.75;
+  /* 字重 */
   --fw-medium: 500;
   --fw-semi: 600;
 
@@ -81,8 +90,8 @@
   --opacity-disabled: .45;  /* 禁用的交互控件 */
   --opacity-muted: .4;      /* 装饰性元素(空状态大图标等) */
 
-  /* 焦点环(输入框与可聚焦容器统一使用) */
-  --focus-ring: 0 0 0 1px var(--md-primary);
+  /* 焦点环(输入框与可聚焦容器统一使用):2px,与 :focus-visible 的 outline 同宽 */
+  --focus-ring: 0 0 0 2px var(--md-primary);
 
   /* 字体:两个面,由**内容**决定,不由区域决定 ——
      散文(源码编辑区 / 预览 / 历史版本 / 文件预览 / 文档标题)一律 --font;
@@ -180,19 +189,15 @@
 /* 五个浮层层级已令牌化,见 :root 的 --z-*(新浮层对号入座,勿造新值) */
 
 /* ================= 浅色:中性色 / 表面 / 错误 =================
-   角色集合保持完整:即使当前无消费者(--md-surface-dim 与 warning/success 的基色),
-   也一并保留 —— 语义色是按"角色名"取用的调色板,缺一个角色,下一个需要它的地方
-   就只能自己造个值,那正是这次重构要消除的问题。 */
+   表面只有三层:画布 surface / 容器 container-low(侧栏、卡槽) /
+   悬浮 container-high(弹层、抽屉)。输入框等"抬起的控件"取 container-high,
+   靠下沿线区分,不再单独增加表面层。 */
 html[data-theme="light"] {
   color-scheme: light;
-  /* 三层表面:画布 / 容器(侧栏、卡槽) / 悬浮(弹层、抽屉) */
+  /* 三层表面 */
   --md-surface: #fcfcfd;
-  --md-surface-dim: #dedfe3;
-  --md-surface-container-lowest: #ffffff;
   --md-surface-container-low: #f6f7f8;
-  --md-surface-container: #f1f2f4;
   --md-surface-container-high: #ffffff;
-  --md-surface-container-highest: #e9eaee;
   --md-on-surface: #1f2329;
   --md-on-surface-variant: #646a73;
   --md-outline: #8f959e;
@@ -220,12 +225,8 @@ html[data-theme="light"] {
 html[data-theme="dark"] {
   color-scheme: dark;
   --md-surface: #141517;
-  --md-surface-dim: #0e0f11;
-  --md-surface-container-lowest: #121315;
   --md-surface-container-low: #1a1b1e;
-  --md-surface-container: #202225;
   --md-surface-container-high: #2a2c30;
-  --md-surface-container-highest: #34373c;
   --md-on-surface: #e3e4e7;
   --md-on-surface-variant: #b9bcc2;
   --md-outline: #83868c;

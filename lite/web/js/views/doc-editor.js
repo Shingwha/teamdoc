@@ -212,7 +212,7 @@ window.DocEditorView = (function () {
       outlineList.innerHTML = headings.length ? headings.map((heading) =>
         '<button type="button" class="outline-level-' + heading.level + '" data-id="' + heading.id + '">' +
         UI.esc(heading.text) + '</button>'
-      ).join('') : '<span class="doc-outline-empty">暂无标题</span>';
+      ).join('') : UI.emptyHtml({ sm: true, title: '暂无标题' });
       paintOutlineActive();
     }
 
@@ -890,7 +890,7 @@ window.DocEditorView = (function () {
 
     async function init() {
       if (!window.DocEditor) {
-        scrollEl.innerHTML = UI.banner({ kind: 'danger', icon: 'error-warning-line', text: '编辑器资源未加载' });
+        scrollEl.innerHTML = UI.error({ message: '编辑器资源未加载' });
         return;
       }
       editor = DocEditor.mount(sourceHost, {
@@ -932,10 +932,7 @@ window.DocEditorView = (function () {
         // 而不是留一片空白让人猜(左侧树仍在,可以点别的文档)
         // innerHTML 而不是 replaceChildren:后者的参数是**节点**,传字符串会把它当
         // 纯文本插进去 —— 页面上就会出现一段 <div class="banner">…</div> 源码。
-        scrollEl.innerHTML = UI.banner({
-          kind: 'danger', icon: 'error-warning-line',
-          text: '打不开这篇文档:' + (e.message || '未知错误') + '(可能已被删除,或链接已失效)',
-        });
+        scrollEl.innerHTML = UI.error({ message: '打不开这篇文档:' + (e.message || '未知错误') + '(可能已被删除,或链接已失效)' });
         return;
       }
       connectWs();
@@ -994,8 +991,12 @@ window.DocEditorView = (function () {
       // 作者名由服务端解析(与文件列表同一形状):静态页不做跨接口 join
       versions = (await api(Endpoints.docVersions(docId))) || [];
       if (!versions.length) {
-        listEl.innerHTML = '<div class="muted small p-2">暂无历史版本</div>';
-        previewEl.innerHTML = '<div class="muted small p-4">该文档还没有历史版本。</div>';
+        listEl.innerHTML = UI.emptyHtml({ sm: true, icon: 'history-line', title: '暂无历史版本' });
+        previewEl.innerHTML = UI.emptyHtml({
+          icon: 'history-line',
+          title: '该文档还没有历史版本',
+          desc: '每次保存都会在这里留下一个可恢复的版本。',
+        });
         return;
       }
       listEl.innerHTML = versions.map((v) => {
@@ -1051,7 +1052,7 @@ window.DocEditorView = (function () {
       // 打开即预览最新一个版本,不用再手点一下
       showVersion(versions[0].id);
     } catch (e) {
-      listEl.innerHTML = UI.banner({ kind: 'danger', icon: 'error-warning-line', text: e.message, sm: true });
+      listEl.innerHTML = UI.error(e, { sm: true });
     }
   }
 

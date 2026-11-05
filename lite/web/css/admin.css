@@ -25,11 +25,11 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2-5);
-  height: 40px;
+  height: var(--ctl-xl);
   padding: 0 var(--sp-3);
   border-radius: var(--radius-full);
   color: var(--md-on-surface-variant);
-  font-size: var(--fs-body);
+  font-size: var(--fs-body); line-height: var(--lh-body);
   text-decoration: none;
   transition: background-color var(--motion-fast), color var(--motion-fast);
 }
@@ -44,10 +44,16 @@
   color: var(--md-on-surface);
 }
 
+.admin-nav-item:active {
+  background: color-mix(in srgb, var(--md-on-surface) var(--state-active), transparent);
+}
+
 .admin-nav-item.active {
-  background: var(--md-primary-container);
-  color: var(--md-on-primary-container);
+  background: color-mix(in srgb, var(--md-on-surface) var(--state-selected), transparent);
+  color: var(--md-on-surface);
   font-weight: var(--fw-semi);
+  border-radius: var(--radius-m);
+  box-shadow: inset 2px 0 0 var(--md-primary);
 }
 
 .admin-content { min-width: 0; }
@@ -74,13 +80,12 @@
 
 /* 用户列表 44px 行(方案 §6.9 的密度要求);表头继续走 --row-h-head */
 .admin-users-table .data-table-row { height: 44px; }
+.admin-users-table { --table-min: 720px; }
 
 /* 管理表格的一行最多按钮数:用户 5(详情/编辑/重置/启禁用/删除),
    空间 4(成员/归档/转让/删除)。列宽由 components.css 的 --col-acts 派生。 */
 .data-table.acts-4 { --acts-n: 4; }
-
-/* 空列表:空态自带留白,单独包一层避免贴住表头 */
-.admin-table-empty { padding: var(--sp-6) 0; }
+.admin-projects-table { --table-min: 720px; }
 
 /* 480px 右侧抽屉:复用 UI.modal 的 Esc/遮罩/堆栈语义,只改几何。
    窄屏在文末的形态块里拉成全屏。 */
@@ -134,7 +139,7 @@
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: conic-gradient(var(--md-primary) calc(var(--pct) * 1%), var(--md-surface-container-highest) 0);
+  background: conic-gradient(var(--md-primary) calc(var(--pct) * 1%), var(--md-outline-variant) 0);
 }
 
 .admin-ring::before {
@@ -146,21 +151,20 @@
 }
 
 .admin-ring.danger {
-  background: conic-gradient(var(--md-error) calc(var(--pct) * 1%), var(--md-surface-container-highest) 0);
+  background: conic-gradient(var(--md-error) calc(var(--pct) * 1%), var(--md-outline-variant) 0);
 }
 
 .admin-ring-label {
   position: relative;
   z-index: 1;
-  font-size: var(--fs-headline);
+  font-size: var(--fs-headline); line-height: var(--lh-headline);
   font-weight: var(--fw-semi);
   color: var(--md-on-surface);
 }
 
 .admin-ring-legend {
   min-width: 0;
-  font-size: var(--fs-label);
-  line-height: 1.7;
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
   color: var(--md-on-surface);
 }
 
@@ -196,7 +200,7 @@
 }
 
 .admin-quota-meta {
-  font-size: var(--fs-label);
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
   color: var(--md-on-surface-variant);
 }
 
@@ -204,7 +208,7 @@
   height: 6px;
   margin-top: var(--sp-1);
   border-radius: var(--radius-full);
-  background: var(--md-surface-container-highest);
+  background: var(--md-outline-variant);
   overflow: hidden;
 }
 

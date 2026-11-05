@@ -72,7 +72,7 @@ window.AdminSections = window.AdminSections || {};
     }
 
     return ring + composition ||
-      '<div class="muted">服务端暂未返回存储数据。</div>';
+      UI.emptyHtml({ sm: true, icon: 'pie-chart-line', title: '服务端暂未返回存储数据' });
   }
 
   function quotaPercent(q) {

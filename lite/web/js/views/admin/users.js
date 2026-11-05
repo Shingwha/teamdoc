@@ -250,12 +250,11 @@ window.AdminSections = window.AdminSections || {};
         });
       }).join('');
       tableEl.innerHTML = head + rows +
-        (list.length ? '' : '<div class="admin-table-empty">' +
-          UI.emptyHtml({
-            icon: 'user-line',
-            title: users.length ? '没有匹配的用户' : '暂无用户',
-            desc: users.length ? '换个关键词或筛选条件试试' : '新建账号后成员即可登录',
-          }) + '</div>');
+        (list.length ? '' : UI.emptyHtml({
+          icon: 'user-line',
+          title: users.length ? '没有匹配的用户' : '暂无用户',
+          desc: users.length ? '换个关键词或筛选条件试试' : '新建账号后成员即可登录',
+        }));
       updateBatchBar();
     }
 
@@ -373,8 +372,11 @@ window.AdminSections = window.AdminSections || {};
         const needle = (qEl.value || '').trim().toLowerCase();
         const rows = all.filter((p) => !needle || (p.name || '').toLowerCase().indexOf(needle) >= 0);
         if (!rows.length) {
-          listEl.innerHTML = '<div class="pp-empty">' +
-            (all.length ? '没有匹配的空间' : '没有可加入的空间') + '</div>';
+          listEl.innerHTML = UI.emptyHtml({
+            sm: true,
+            icon: 'team-line',
+            title: all.length ? '没有匹配的空间' : '没有可加入的空间',
+          });
           return;
         }
         listEl.innerHTML = rows.map((p) =>
@@ -710,7 +712,7 @@ window.AdminSections = window.AdminSections || {};
       })).join('');
       return UI.card({
         title: '活跃会话(' + list.length + ')', icon: 'computer-line',
-        body: rows || '<div class="muted">没有未过期的会话。</div>',
+        body: rows || UI.emptyHtml({ sm: true, icon: 'computer-line', title: '没有未过期的会话' }),
         actions: list.length
           ? UI.btn({ label: '全部下线', kind: 'danger-outline', size: 'sm', id: 'acc-kick-all' })
           : '',
@@ -728,7 +730,7 @@ window.AdminSections = window.AdminSections || {};
       return UI.card({
         title: '登录记录(最近 ' + list.length + ' 条)', icon: 'history-line',
         note: '含密码错误与触发锁定;冷却期内被拦下的请求不落记录(它们在"登录限制"里体现)',
-        body: rows || '<div class="muted">暂无登录记录。</div>',
+        body: rows || UI.emptyHtml({ sm: true, icon: 'history-line', title: '暂无登录记录' }),
       });
     }
 

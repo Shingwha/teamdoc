@@ -55,7 +55,7 @@
   margin-bottom: var(--sp-2-5);
   border: none;
   background: transparent;
-  font-size: var(--fs-display);
+  font-size: var(--fs-display); line-height: var(--lh-display);
   font-weight: var(--fw-semi);
   color: var(--md-on-surface);
   padding: 0 var(--sp-2-5);
@@ -87,8 +87,7 @@
   background: transparent;
   color: var(--md-on-surface);
   font-family: var(--font);
-  font-size: var(--fs-prose);
-  line-height: var(--lh-loose);
+  font-size: var(--fs-prose); line-height: var(--lh-prose);
   tab-size: 2;
   caret-color: var(--md-primary);
   white-space: pre-wrap;
@@ -96,24 +95,22 @@
 }
 
 /* ---------- 2. 预览排版 .markdown-body(文档预览与历史版本预览共用) ----------
-   节奏参考阅读器排版:行高 1.75、标题层级间距;宽度由 .editor-canvas 网格约束,配色/圆角全走令牌。
+   节奏参考阅读器排版:正文 16/26、标题层级间距;宽度由 .editor-canvas 网格约束,配色/圆角全走令牌。
    字面与字号同源码编辑区(--font / --fs-prose):切换模式时正文不重排,只有标记符消失、
    行内代码与代码块换成代码面 */
 .markdown-body {
   font-family: var(--font);
-  font-size: var(--fs-prose);
-  line-height: var(--lh-loose);
+  font-size: var(--fs-prose); line-height: var(--lh-prose);
   color: var(--md-on-surface);
   word-wrap: break-word;
 }
 .markdown-body h1, .markdown-body h2, .markdown-body h3 {
   font-weight: var(--fw-semi);
-  line-height: var(--lh-tight);
   border-bottom: none;
 }
-.markdown-body h1 { font-size: var(--fs-display); margin: var(--sp-5) 0 var(--sp-2-5); }
-.markdown-body h2 { font-size: var(--fs-headline); margin: var(--sp-4) 0 var(--sp-2); }
-.markdown-body h3 { font-size: var(--fs-title); margin: var(--sp-3-5) 0 var(--sp-1-5); }
+.markdown-body h1 { font-size: var(--fs-display); line-height: var(--lh-display); margin: var(--sp-5) 0 var(--sp-2-5); }
+.markdown-body h2 { font-size: var(--fs-headline); line-height: var(--lh-headline); margin: var(--sp-4) 0 var(--sp-2); }
+.markdown-body h3 { font-size: var(--fs-title-lg); line-height: var(--lh-title-lg); margin: var(--sp-3-5) 0 var(--sp-1-5); }
 .markdown-body p { margin: var(--sp-1-5) 0; }
 .markdown-body ul, .markdown-body ol { margin: var(--sp-1-5) 0; padding-left: 1.6em; }
 .markdown-body li { margin: var(--sp-0-5) 0; }
@@ -142,8 +139,7 @@
   padding: var(--sp-3) var(--sp-4);
   margin: var(--sp-2-5) 0;
   overflow-x: auto;
-  font-size: var(--fs-sm);
-  line-height: var(--lh-normal);
+  font-size: var(--fs-label); line-height: var(--lh-label);
 }
 .markdown-body pre code {
   background: transparent;
@@ -191,13 +187,13 @@
   border-radius: var(--radius-s);
   background: var(--md-error-container);
   color: var(--md-on-error-container);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-label); line-height: var(--lh-label);
 }
 
 /* 脚注:文末脚注区 + 正文角标。定义只在脚注区出现,正文里留一个上标数字 */
 .markdown-body .md-footnotes {
   margin-top: var(--sp-6);
-  font-size: var(--fs-sm);
+  font-size: var(--fs-label); line-height: var(--lh-label);
   color: var(--md-on-surface-variant);
 }
 .markdown-body .md-footnotes hr { margin: 0 0 var(--sp-2); }
@@ -218,7 +214,7 @@
   padding: 0 var(--sp-0-5);
   border-radius: var(--radius-s);
 }
-.markdown-body sub, .markdown-body sup { font-size: var(--fs-label); line-height: 0; }
+.markdown-body sub, .markdown-body sup { font-size: var(--fs-caption); line-height: 0; }
 
 /* ---------- 2c. 代码块角标(语言 + 复制) ---------- */
 
@@ -237,10 +233,9 @@
 .md-code-lang {
   padding: 0 var(--sp-1-5);
   border-radius: var(--radius-s);
-  background: var(--md-surface-container-highest);
+  background: var(--md-surface-container-low);
   color: var(--md-on-surface-variant);
-  font-size: var(--fs-xs);
-  line-height: var(--ctl-2xs);
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
 }
 .md-code-copy { color: var(--md-on-surface-variant); }
 .md-code-copy:hover { color: var(--md-on-surface); }
@@ -324,7 +319,7 @@ html[data-theme="dark"] a[href^="teamdoc://"]:hover { filter: brightness(1.12); 
   gap: var(--sp-2);
   flex-wrap: wrap;
   margin-top: var(--sp-8);
-  font-size: var(--fs-label);
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
   color: var(--md-on-surface-variant);
 }
 .doc-backlinks .bl-chip {
@@ -337,7 +332,7 @@ html[data-theme="dark"] a[href^="teamdoc://"]:hover { filter: brightness(1.12); 
   border-radius: var(--radius-full);
   background: var(--md-surface-container-high);
   color: var(--md-on-surface-variant);
-  font-size: var(--fs-label);
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
   cursor: pointer;
   transition: background-color var(--motion-fast), color var(--motion-fast);
 }
@@ -361,7 +356,7 @@ html[data-theme="dark"] a[href^="teamdoc://"]:hover { filter: brightness(1.12); 
 .editor-head .head-more { display: none; }
 /* 冲突时替身按钮可见信号(窄屏状态下拉不可见,保存按钮同样可作处理入口) */
 .editor-head .head-more.conflict { color: var(--md-error); }
-.menu-header .head-more-status { font-size: var(--fs-label); color: var(--md-on-surface-variant); }
+.menu-header .head-more-status { font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--md-on-surface-variant); }
 .menu-header .head-more-presence { display: flex; gap: var(--sp-0-5); margin-top: var(--sp-1); }
 
 /* ---------- 9b. 编辑头精简:按编辑列实际宽度(容器查询),不按视口 ----------
@@ -404,10 +399,10 @@ html[data-theme="dark"] a[href^="teamdoc://"]:hover { filter: brightness(1.12); 
 .md-source .cm-scroller { overflow: visible; font-family: var(--font); }
 .md-source .cm-line { padding: 0; }
 .doc-meta {
-  min-height: var(--fs-label);
+  min-height: var(--fs-caption);
   margin: 0 0 var(--sp-4);
   color: var(--md-on-surface-variant);
-  font-size: var(--fs-label);
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
 }
 .doc-statusbar {
   flex: none;
@@ -420,7 +415,7 @@ html[data-theme="dark"] a[href^="teamdoc://"]:hover { filter: brightness(1.12); 
   border-top: 1px solid var(--md-outline-variant);
   color: var(--md-on-surface-variant);
   background: var(--md-surface);
-  font-size: var(--fs-xs);
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
   font-variant-numeric: tabular-nums;
 }
 /* 保存状态 = 圆点 + 文字(编辑头与状态栏两处同形)。圆点只表达状态,文字才是事实 */
@@ -456,7 +451,7 @@ html[data-theme="dark"] a[href^="teamdoc://"]:hover { filter: brightness(1.12); 
   overflow-y: auto;
   padding: var(--sp-3);
   color: var(--md-on-surface-variant);
-  font-size: var(--fs-label);
+  font-size: var(--fs-caption); line-height: var(--lh-caption);
 }
 .doc-outline-title { margin-bottom: var(--sp-2); font-weight: var(--fw-medium); color: var(--md-on-surface); }
 #doc-outline-list { display: flex; flex-direction: column; gap: var(--sp-0-5); }
@@ -480,7 +475,6 @@ html[data-theme="dark"] a[href^="teamdoc://"]:hover { filter: brightness(1.12); 
 #doc-outline-list .outline-level-2 { padding-left: var(--sp-4); }
 #doc-outline-list .outline-level-3 { padding-left: var(--sp-6); }
 #doc-outline-list .outline-level-4, #doc-outline-list .outline-level-5, #doc-outline-list .outline-level-6 { padding-left: var(--sp-8); }
-.doc-outline-empty { padding: var(--sp-2); }
 .editor-canvas.preview-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1600px) minmax(0, 1fr); }
 .preview-split .doc-body {
   display: grid;
@@ -502,7 +496,7 @@ html[data-theme="dark"] a[href^="teamdoc://"]:hover { filter: brightness(1.12); 
   border-left: 1px solid var(--md-outline-variant);
 }
 .editor-shortcuts { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-3) var(--sp-6); align-items: center; }
-.editor-shortcuts kbd { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--md-on-surface-variant); }
+.editor-shortcuts kbd { font-family: var(--font-mono); font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--md-on-surface-variant); }
 body.doc-focus-mode #sidebar,
 body.doc-focus-mode .doc-outline, body.doc-focus-mode #doc-mode-seg { display: none; }
 body.doc-focus-mode .editor-canvas { grid-template-columns: minmax(0, 1fr) minmax(0, 800px) minmax(0, 1fr); }
@@ -544,7 +538,7 @@ body.doc-focus-mode .doc-content { grid-column: 2; }
   cursor: pointer;
 }
 .doc-tool-btn:hover { background: color-mix(in srgb, var(--md-on-surface) var(--state-hover), transparent); color: var(--md-on-surface); }
-.doc-tool-btn:active { background: color-mix(in srgb, var(--md-on-surface) var(--state-selected), transparent); }
+.doc-tool-btn:active { background: color-mix(in srgb, var(--md-on-surface) var(--state-active), transparent); }
 
 @media (max-width: 720px) {
   /* 契约身份 2(密度:窄屏底部工具条与状态栏缩排)—— 只切换形态/收紧间距,五项都在 */
