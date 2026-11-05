@@ -11,7 +11,10 @@ Windows 坑(都实测踩过,别丢):
 """
 import os
 import re
+import shutil
 import subprocess
+import tempfile
+import time
 import urllib.parse
 from contextlib import contextmanager
 from pathlib import Path
@@ -77,6 +80,25 @@ def temp_page(name, inject):
             page.unlink()
 
 
+def run_chrome(chrome, args, timeout=300):
+    """一次 Chrome 调用用独立临时 profile。
+
+    默认 profile 会在多次用例之间共享 localStorage(主题、文档模式、视图偏好…),
+    造成顺序依赖与假红;独立 profile 同时避免碰到用户正在运行的 Chrome 会话。
+    Windows 上 profile 可能被 Chrome 短暂锁住,删除失败重试几轮。"""
+    profile = tempfile.mkdtemp(prefix="td_chrome_")
+    try:
+        proc = subprocess.run([chrome, f"--user-data-dir={profile}"] + list(args),
+                              capture_output=True, timeout=timeout)
+        return proc.stdout
+    finally:
+        for _ in range(8):
+            shutil.rmtree(profile, ignore_errors=True)
+            if not os.path.exists(profile):
+                break
+            time.sleep(0.25)
+
+
 def dump_page(chrome, base_url, page_name, query="", budget=12000, window_size=None):
     """跑一次无头 Chrome 并取回 DOM 文本。
 
@@ -84,12 +106,11 @@ def dump_page(chrome, base_url, page_name, query="", budget=12000, window_size=N
     需要宽屏形态(网格/内联侧栏)的用例显式传入。
     无头模式用 `--headless=new`:旧无头在有普通 Chrome 进程运行时会吞掉 URL。"""
     url = f"{base_url}/{page_name}" + (f"?{query}" if query else "")
-    args = [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
+    args = ["--headless=new", "--disable-gpu", "--no-sandbox",
             f"--virtual-time-budget={budget}", "--dump-dom", url]
     if window_size:
-        args.insert(1, f"--window-size={window_size}")
-    proc = subprocess.run(args, capture_output=True, timeout=300)
-    return proc.stdout.decode("utf-8", "replace")
+        args.insert(0, f"--window-size={window_size}")
+    return run_chrome(chrome, args).decode("utf-8", "replace")
 
 
 def read_report(dom_text, out_id="sweep-out"):

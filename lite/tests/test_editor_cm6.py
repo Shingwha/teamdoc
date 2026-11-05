@@ -9,7 +9,8 @@ import urllib.parse
 
 import pytest
 
-from _chrome import dump_page, error_trap_js, find_chrome, login_js, read_report, temp_page
+from _chrome import (dump_page, error_trap_js, find_chrome, login_js, read_report,
+                     run_chrome, temp_page)
 from _harness import WEB_DIR
 
 ROOT = WEB_DIR.parent
@@ -457,12 +458,11 @@ __ERRTRAP_JS__
 def _dump_sized(chrome, base_url, page, query, width, height, budget):
     """按指定视口跑一次无头 Chrome(宽屏 pane 的 matchMedia 依赖真实窗口宽度)。"""
     url = f"{base_url}/{page}?{query}"
-    proc = subprocess.run(
-        [chrome, "--headless", "--disable-gpu", "--no-sandbox",
-         f"--window-size={width},{height}", f"--virtual-time-budget={budget}", "--dump-dom", url],
-        capture_output=True, timeout=300,
-    )
-    return proc.stdout.decode("utf-8", "replace")
+    return run_chrome(chrome, [
+        "--headless=new", "--disable-gpu", "--no-sandbox",
+        f"--window-size={width},{height}", f"--virtual-time-budget={budget}",
+        "--dump-dom", url,
+    ]).decode("utf-8", "replace")
 
 
 @pytest.mark.browser

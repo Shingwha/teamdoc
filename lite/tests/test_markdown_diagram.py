@@ -52,6 +52,9 @@ DIAGRAM_DRILL_INJECT = '''  <script>
     __ERRTRAP_JS__
     // 编辑器记住的模式:直接进预览态,省掉"点分段按钮"这一步(VIEWER 本来就是预览)
     try { localStorage.setItem('td:doc-mode', 'preview'); } catch (e) {}
+    // 浏览器测试共用默认 profile,localStorage 可能残留上一次的 dark;不先落到浅色,
+    // 后面的 setMode('dark') 就是无变化调用,"切主题重画"断言会假红。
+    try { Theme.setMode('light'); } catch (e) {}
   </script>
   <script src="/js/app.js"></script>
   <script>
