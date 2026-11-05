@@ -1,7 +1,5 @@
-"""通用 HTTP 字段解析与请求来源工具。"""
+"""通用 HTTP 字段解析（纯函数，不依赖 FastAPI）。"""
 import re
-
-from fastapi import Request
 
 from errors import bad_request
 from ids import normalize_id
@@ -108,11 +106,3 @@ def quota_field(payload: dict, key: str = "quotaBytes") -> int | None:
     if v is not None and v < 0:
         bad_request(f"{key} 不能为负")
     return v or None
-
-
-def client_ip(request: Request) -> str:
-    return request.client.host if request.client and request.client.host else ""
-
-
-def client_ua(request: Request) -> str:
-    return (request.headers.get("user-agent") or "")[:300]

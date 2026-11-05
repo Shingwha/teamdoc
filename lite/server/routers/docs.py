@@ -2,12 +2,11 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session as DbSession
 
-from db import get_db
+from deps import (IdPath, get_db, pat_write_guard, require_project_role,
+                  require_role)
 from errors import CONFLICT, err
-from ids import IdPath
 from models import Doc
-from security.context import (AuthContext, pat_write_guard, require_project_role,
-                              require_role)
+from security.context import Actor
 from services import docs
 
 router = APIRouter(dependencies=[Depends(pat_write_guard)])
@@ -16,14 +15,14 @@ DOC_EDIT = require_role(Doc, "文档", "EDITOR", path_param="doc_id", write=True
 
 
 @router.get("/api/projects/{project_id}/docs/tree")
-def doc_tree(project_id: IdPath, ctx: AuthContext = Depends(require_project_role("VIEWER")),
+def doc_tree(project_id: IdPath, ctx: Actor = Depends(require_project_role("VIEWER")),
              db: DbSession = Depends(get_db)):
     return docs.doc_tree(db, project_id)
 
 
 @router.post("/api/projects/{project_id}/docs")
 def create_doc(project_id: IdPath, payload: dict,
-               ctx: AuthContext = Depends(require_project_role("EDITOR", write=True)),
+               ctx: Actor = Depends(require_project_role("EDITOR", write=True)),
                db: DbSession = Depends(get_db)):
     return docs.create_doc(db, project_id, payload, ctx)
 

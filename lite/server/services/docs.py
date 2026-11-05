@@ -7,7 +7,7 @@ from db import SessionLocal, is_live, utcnow
 from errors import CONFLICT, NOT_FOUND, bad_request, err
 from http_util import id_field, int_field, opt_id, query_id, str_field
 from models import Doc, DocVersion, File, Project, User
-from security.context import (AuthContext, ensure_move_allowed, get_project_or_404,
+from security.context import (Actor, ensure_move_allowed, get_project_or_404,
                               has_role, project_role, session_context, space_archived,
                               validate_parent)
 from serialize import avatar_color_for, doc_json, version_json
@@ -65,7 +65,7 @@ def doc_tree(db: DbSession, project_id: str) -> list:
     return build_tree(docs, lambda d: doc_json(d, face="tree"))
 
 
-def create_doc(db: DbSession, project_id: str, payload: dict, ctx: AuthContext) -> dict:
+def create_doc(db: DbSession, project_id: str, payload: dict, ctx: Actor) -> dict:
     get_project_or_404(db, project_id)
     title = str_field(payload, "title", 200) or "无标题文档"
     parent_id = opt_id(payload.get("parentId"))
@@ -83,7 +83,7 @@ def get_doc(db: DbSession, doc: Doc) -> dict:
                     location=location_json(db, doc.project_id, Doc, doc.parent_id, "title"))
 
 
-def list_backlinks(db: DbSession, doc: Doc, ctx: AuthContext) -> list:
+def list_backlinks(db: DbSession, doc: Doc, ctx: Actor) -> list:
     visible = visible_project_ids(db, ctx.user)
     rows = (db.query(Doc).filter(Doc.deleted_at.is_(None), Doc.id != doc.id,
                                  Doc.project_id.in_(visible),
@@ -96,7 +96,7 @@ def list_backlinks(db: DbSession, doc: Doc, ctx: AuthContext) -> list:
             for d in hits[:100]]
 
 
-def patch_doc(db: DbSession, doc: Doc, payload: dict, ctx: AuthContext) -> dict:
+def patch_doc(db: DbSession, doc: Doc, payload: dict, ctx: Actor) -> dict:
     if "title" in payload:
         doc.title = str_field(payload, "title", 200, required=True)
     if "parentId" in payload:
@@ -111,7 +111,7 @@ def patch_doc(db: DbSession, doc: Doc, payload: dict, ctx: AuthContext) -> dict:
     return doc_brief(doc)
 
 
-def move_doc(db: DbSession, doc: Doc, payload: dict, ctx: AuthContext) -> dict:
+def move_doc(db: DbSession, doc: Doc, payload: dict, ctx: Actor) -> dict:
     target_id = id_field(payload, "projectId", required=True)
     parent_id = opt_id(payload.get("parentId"))
     src_id = doc.project_id
@@ -132,7 +132,7 @@ def move_doc(db: DbSession, doc: Doc, payload: dict, ctx: AuthContext) -> dict:
 
 
 def move_check(db: DbSession, doc: Doc, project_id: str, parent_id: str,
-               ctx: AuthContext) -> dict:
+               ctx: Actor) -> dict:
     target = query_id(project_id, "projectId") or doc.project_id
     parent = opt_id(parent_id)
     ensure_move_allowed(db, ctx, doc.project_id, target)
@@ -271,7 +271,7 @@ def presence_users(conns) -> list[dict]:
              "avatarColor": c["avatarColor"]} for c in conns]
 
 
-def resolve_base_version(ctx: AuthContext, payload: dict, *,
+def resolve_base_version(ctx: Actor, payload: dict, *,
                          read_modify_write: bool = False) -> int | None:
     if read_modify_write:
         return None
@@ -281,7 +281,7 @@ def resolve_base_version(ctx: AuthContext, payload: dict, *,
     return base
 
 
-def put_content(db: DbSession, doc: Doc, payload: dict, ctx: AuthContext) -> dict:
+def put_content(db: DbSession, doc: Doc, payload: dict, ctx: Actor) -> dict:
     content = str_content(payload)
     if content is None:
         bad_request("content 必须为字符串")
@@ -289,7 +289,7 @@ def put_content(db: DbSession, doc: Doc, payload: dict, ctx: AuthContext) -> dic
                          base_version=resolve_base_version(ctx, payload))
 
 
-def append_content(db: DbSession, doc: Doc, payload: dict, ctx: AuthContext) -> dict:
+def append_content(db: DbSession, doc: Doc, payload: dict, ctx: Actor) -> dict:
     content = str_content(payload)
     if content is None:
         bad_request("content 必须为字符串")
@@ -314,7 +314,7 @@ def get_version(db: DbSession, doc: Doc, vid: str) -> dict:
     return {"content": v.content}
 
 
-def restore_version(db: DbSession, doc: Doc, vid: str, ctx: AuthContext) -> dict:
+def restore_version(db: DbSession, doc: Doc, vid: str, ctx: Actor) -> dict:
     v = db.query(DocVersion).filter_by(id=vid, doc_id=doc.id).first()
     if not v:
         err(404, NOT_FOUND, "版本不存在")

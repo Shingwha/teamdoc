@@ -2,10 +2,10 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session as DbSession
 
-from db import get_db
-from ids import IdPath
+from deps import (IdPath, get_db, pat_write_guard, require_project_role,
+                  require_role)
 from models import Doc, File, Folder
-from security.context import AuthContext, pat_write_guard, require_project_role, require_role
+from security.context import Actor
 from services import trash
 
 router = APIRouter(dependencies=[Depends(pat_write_guard)])
@@ -74,6 +74,6 @@ def permanent_delete_file(dep=Depends(FILE_TRASH), db: DbSession = Depends(get_d
 
 @router.get("/api/projects/{project_id}/trash")
 def project_trash(project_id: IdPath,
-                  ctx: AuthContext = Depends(require_project_role("VIEWER")),
+                  ctx: Actor = Depends(require_project_role("VIEWER")),
                   db: DbSession = Depends(get_db)):
     return trash.project_trash(db, project_id)

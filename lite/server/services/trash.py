@@ -5,7 +5,7 @@ from db import utcnow
 from errors import CONFLICT, err
 from http_util import int_field
 from models import Doc, DocVersion, File, FileVersion, Folder
-from security.context import AuthContext
+from security.context import Actor
 from serialize import file_json, iso
 from services import versions
 from treeutil import collect_subtree, next_sort
@@ -15,7 +15,7 @@ def _result(kind: str, count: int) -> dict:
     return {"ok": True, "kind": kind, "count": count}
 
 
-def soft_delete_tree(db: DbSession, model, root, ctx: AuthContext) -> tuple:
+def soft_delete_tree(db: DbSession, model, root, ctx: Actor) -> tuple:
     ids = collect_subtree(db, model, root)
     now = utcnow()
     main = db.query(model).filter(model.id.in_(ids), model.deleted_at.is_(None)).update(
@@ -32,7 +32,7 @@ def soft_delete_tree(db: DbSession, model, root, ctx: AuthContext) -> tuple:
     return main, len(files)
 
 
-def restore_tree(db: DbSession, model, root, ctx: AuthContext) -> tuple:
+def restore_tree(db: DbSession, model, root, ctx: Actor) -> tuple:
     ids = collect_subtree(db, model, root)
     main = db.query(model).filter(model.id.in_(ids), model.deleted_at.isnot(None)).update(
         {"deleted_at": None}, synchronize_session=False)
@@ -93,7 +93,7 @@ def permanent_delete_folder(db: DbSession, folder: Folder) -> dict:
     return _result("folder", len(ids) + len(files))
 
 
-def delete_file(db: DbSession, f: File, ctx: AuthContext) -> dict:
+def delete_file(db: DbSession, f: File, ctx: Actor) -> dict:
     now = utcnow()
     f.deleted_at = now
     f.updated_by = ctx.user.id
@@ -103,7 +103,7 @@ def delete_file(db: DbSession, f: File, ctx: AuthContext) -> dict:
     return _result("file", 1)
 
 
-def restore_deleted_file(db: DbSession, f: File, ctx: AuthContext) -> dict:
+def restore_deleted_file(db: DbSession, f: File, ctx: Actor) -> dict:
     _require_in_trash(f, "文件")
     if _parent_gone(db, Folder, f.folder_id, f.project_id):
         f.folder_id = None
@@ -117,7 +117,7 @@ def restore_deleted_file(db: DbSession, f: File, ctx: AuthContext) -> dict:
 
 
 def restore_file_or_version(db: DbSession, f: File, payload: dict | None,
-                            ctx: AuthContext) -> dict:
+                            ctx: Actor) -> dict:
     """同一路由按删除状态区分回收站恢复与文件版本恢复。"""
     if f.deleted_at is not None:
         return restore_deleted_file(db, f, ctx)

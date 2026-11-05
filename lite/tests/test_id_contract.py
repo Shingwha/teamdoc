@@ -10,6 +10,7 @@ payload、dataset、正文、备份)。靠"记得去看一眼"维持一致是不
 import pytest
 from sqlalchemy import Integer, MetaData, String, create_engine, text
 
+import deps
 import ids
 import schema
 from services import refs
@@ -73,7 +74,7 @@ def test_idpath_validation_is_the_same_judgement():
     """路由用的 IdPath 与 is_id 必须是同一判定(否则"路由放行、查询落空")。"""
     import pydantic
     v = ids.new_id()
-    ta = pydantic.TypeAdapter(ids.IdPath)
+    ta = pydantic.TypeAdapter(deps.IdPath)
     assert ta.validate_python(v.lower()) == v, "IdPath 也做大小写归一"
     for bad in ("999999", "", "!" * 26, "i" * 26):   # i/I 不在字母表里
         with pytest.raises(pydantic.ValidationError):

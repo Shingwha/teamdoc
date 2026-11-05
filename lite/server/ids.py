@@ -12,18 +12,14 @@
 形态遵循 ULID 规范:大写、无连字符;字母表排除 I/L/O/U,手抄与口述不易混淆。
 解码在**边界处**大小写不敏感(链接被人手工改成小写也认得),库里只存大写形态。
 
-这里同时提供 FastAPI 的类型别名 `IdPath`:资源 id 的形状只有这一处定义,路由签名写
-`doc_id: IdPath` 即获得校验,非法值走 main.py 的 RequestValidationError 处理
-→ 400 VALIDATION(坏链接在边界上就被拦下,不会进到查询里变成一次 404)。
+路由路径参数的类型别名 `IdPath` 在 `deps.py`(它需要 pydantic);本模块保持纯函数,
+供服务层、模型与序列化共用。
 """
 from __future__ import annotations
 
 import re
 import secrets
 import time
-from typing import Annotated
-
-from pydantic import AfterValidator
 
 _ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"   # Crockford Base32:无 I L O U
 ID_LEN = 26
@@ -58,13 +54,3 @@ def normalize_id(value) -> str | None:
         return None
     up = value.upper()
     return up if is_id(up) else None
-
-
-def _validate(value: str) -> str:
-    got = normalize_id(value)
-    if got is None:
-        raise ValueError("id 形状非法")
-    return got
-
-
-IdPath = Annotated[str, AfterValidator(_validate)]   # 路由路径参数用:doc_id: IdPath

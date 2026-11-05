@@ -1,15 +1,16 @@
-"""认证上下文、FastAPI 鉴权依赖与全站权限判定。"""
-import inspect
+"""认证上下文与全站权限判定（纯业务，不依赖 FastAPI）。
+
+路由层的认证依赖在 `deps.py`；服务层只接收这里的 `Actor` 并调用权限判定，
+因此 `services/**` 不会经本模块间接接触 Request/Depends。
+"""
 from dataclasses import dataclass, field
 from datetime import timedelta
 
-from fastapi import Depends, Request
 from sqlalchemy.orm import Session as DbSession
 
-from db import get_db, is_live, utcnow
+from db import is_live, utcnow
 from errors import (CONFLICT, FORBIDDEN, JOIN_REQUIRED, NOT_FOUND,
-                    READ_ONLY_TOKEN, SPACE_ARCHIVED, UNAUTHORIZED, err)
-from ids import IdPath
+                    SPACE_ARCHIVED, err)
 from models import AuthSession, Project, ProjectMember, User
 from security import sessions
 from treeutil import collect_subtree
@@ -18,7 +19,8 @@ ROLE_RANK = {"OWNER": 3, "ADMIN": 2, "EDITOR": 1, "VIEWER": 0}
 
 
 @dataclass
-class AuthContext:
+class Actor:
+    """一次调用的身份快照；会话字段只在 Web 会话路径上有值。"""
     user: User
     via: str
     scopes: list = field(default_factory=list)
@@ -27,26 +29,7 @@ class AuthContext:
     session_lifetime: float | None = None
 
 
-def authenticate(request: Request, db: DbSession = Depends(get_db)) -> AuthContext | None:
-    authz = request.headers.get("authorization", "")
-    if authz.startswith("Bearer "):
-        token = authz[7:].strip()
-        if token.startswith("tdp_"):
-            pat = sessions.active_pat(db, token)
-            if not pat:
-                return None
-            user = db.get(User, pat.user_id)
-            if not user or user.is_disabled:
-                return None
-            now = utcnow()
-            if pat.last_used_at is None or (now - pat.last_used_at).total_seconds() > 60:
-                pat.last_used_at = now
-                db.commit()
-            return AuthContext(user=user, via="pat", scopes=pat.scopes.split(","), pat_id=pat.id)
-    return session_context(db, request.cookies.get(sessions.SESSION_COOKIE))
-
-
-def session_context(db: DbSession, token: str | None) -> AuthContext | None:
+def session_context(db: DbSession, token: str | None) -> Actor | None:
     if not token:
         return None
     sess = db.get(AuthSession, token)
@@ -66,27 +49,8 @@ def session_context(db: DbSession, token: str | None) -> AuthContext | None:
         dirty = True
     if dirty:
         db.commit()
-    return AuthContext(user=user, via="web", scopes=["read", "write"],
-                       session_token=token, session_lifetime=lifetime)
-
-
-def current_user(request: Request, ctx: AuthContext | None = Depends(authenticate)) -> AuthContext:
-    if ctx is None:
-        err(401, UNAUTHORIZED, "未登录")
-    request.state.auth = ctx
-    return ctx
-
-
-def pat_write_guard(request: Request, ctx: AuthContext | None = Depends(authenticate)) -> None:
-    if request.method != "GET" and ctx is not None and ctx.via == "pat" \
-            and "write" not in ctx.scopes:
-        err(403, READ_ONLY_TOKEN, "令牌缺少 write 权限")
-
-
-def require_admin(ctx: AuthContext = Depends(current_user)) -> AuthContext:
-    if not ctx.user.is_admin:
-        err(403, FORBIDDEN, "需要管理员权限")
-    return ctx
+    return Actor(user=user, via="web", scopes=["read", "write"],
+                 session_token=token, session_lifetime=lifetime)
 
 
 def project_role_and_membership(db: DbSession, project_id: str,
@@ -105,10 +69,6 @@ def project_role_and_membership(db: DbSession, project_id: str,
 
 def project_role(db: DbSession, project_id: str, user: User) -> str | None:
     return project_role_and_membership(db, project_id, user)[0]
-
-
-def is_project_member(db: DbSession, project_id: str, user: User) -> bool:
-    return project_role_and_membership(db, project_id, user)[1]
 
 
 def is_project_owner_or_admin(db: DbSession, project_id: str, user: User) -> bool:
@@ -134,7 +94,7 @@ def ensure_space_mutable(db: DbSession, project_id: str) -> None:
         err(403, SPACE_ARCHIVED, "空间已归档，请先解除归档再修改内容")
 
 
-def ensure_project_role(db: DbSession, ctx: AuthContext, project_id: str,
+def ensure_project_role(db: DbSession, ctx: Actor, project_id: str,
                         required: str, *, write: bool = False) -> str | None:
     """权限先于归档判定：非成员永远看不到“空间已归档”，避免泄露空间状态。"""
     role = project_role(db, project_id, ctx.user)
@@ -155,7 +115,7 @@ def get_project_or_404(db: DbSession, project_id: str) -> Project:
     return p
 
 
-def ensure_move_allowed(db: DbSession, ctx: AuthContext,
+def ensure_move_allowed(db: DbSession, ctx: Actor,
                         src_project_id: str, target_project_id: str) -> None:
     ensure_project_role(db, ctx, src_project_id,
                         "ADMIN" if target_project_id != src_project_id else "EDITOR",
@@ -175,41 +135,8 @@ def validate_parent(db: DbSession, model, parent_id: str | None, project_id: str
         err(409, CONFLICT, "不能移动到自己的子层级下")
 
 
-def require_project_role(required: str, *, write: bool = False):
-    def dep(project_id: IdPath, ctx: AuthContext = Depends(current_user),
-            db: DbSession = Depends(get_db)) -> AuthContext:
-        get_project_or_404(db, project_id)
-        ensure_project_role(db, ctx, project_id, required, write=write)
-        return ctx
-    return dep
-
-
 def load_live(db: DbSession, model, res_id: str, label: str):
     res = db.get(model, res_id)
     if not is_live(res):
         err(404, NOT_FOUND, f"{label}不存在")
     return res
-
-
-def require_role(model, label: str, required: str, *, path_param: str,
-                 for_trash: bool = False, write: bool = False):
-    """统一“存在 → 权限 → 删除状态”顺序，避免非成员探测资源状态。"""
-    def dep(**kw) -> tuple:
-        ctx: AuthContext = kw["ctx"]
-        db: DbSession = kw["db"]
-        res = db.get(model, kw[path_param])
-        if not res:
-            err(404, NOT_FOUND, f"{label}不存在")
-        ensure_project_role(db, ctx, res.project_id, required, write=write)
-        if res.deleted_at is not None and not for_trash:
-            err(404, NOT_FOUND, f"{label}不存在")
-        return ctx, res
-    dep.__signature__ = inspect.Signature(parameters=[
-        inspect.Parameter(path_param, inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                          annotation=IdPath),
-        inspect.Parameter("ctx", inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                          annotation=AuthContext, default=Depends(current_user)),
-        inspect.Parameter("db", inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                          annotation=DbSession, default=Depends(get_db)),
-    ])
-    return dep

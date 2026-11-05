@@ -22,7 +22,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
-from ids import IdPath
+from deps import IdPath
 from security.sessions import SESSION_COOKIE
 from services.docs import (ContentConflict, WsRejected, presence_users, str_content,
                            ws_handshake, ws_save)

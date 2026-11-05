@@ -1,11 +1,10 @@
-"""会话签发、PAT 秘密散列、登录节流与独立安全审计。"""
+"""会话签发、PAT 秘密散列、登录节流与独立安全审计（不依赖 FastAPI）。"""
 import hashlib
 import logging
 import secrets
 import time
 from datetime import timedelta
 
-from fastapi import Response
 from sqlalchemy.orm import Session as DbSession
 
 import config
@@ -54,11 +53,6 @@ def create_session(db: DbSession, user_id: str, ttl: int = SESSION_TTL, *,
                        ip=ip or None, user_agent=ua or None, last_seen_at=now))
     db.commit()
     return token
-
-
-def set_session_cookie(response: Response, token: str, max_age: int = SESSION_TTL):
-    response.set_cookie(SESSION_COOKIE, token, max_age=max_age,
-                        httponly=True, samesite="lax", path="/")
 
 
 def record_login_event(db: DbSession, *, user: User | None, email: str, ip: str,
