@@ -11,8 +11,8 @@ import pytest
 from sqlalchemy import Integer, MetaData, String, create_engine, text
 
 import ids
-import refs
 import schema
+from services import refs
 
 
 # ---------- id 形状 ----------

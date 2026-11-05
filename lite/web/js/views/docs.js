@@ -1,52 +1,41 @@
-// views/docs.js — 文档模块作用域(#/p/{id}/docs[/{docId}]):树列 + 文档位
+// views/docs.js — 文档模块作用域(#/p/{id}/docs[/{docId}]):唯一文档树(左栏)+ 编辑区
 //   两层作用域各管一件事:
 //     p/{pid}/docs        文档模块层 —— 切文档时它**原样留着**:树不重取、不重绘,
-//                         折叠态与滚动位置都在,树面板开关也归它
-//     p/{pid}/docs/{id|-} 文档位层 —— 唯一随文档切换重建的那一层:编辑器(views/doc-editor.js)
-//                         或"未选文档"空态。槽位永远有层,所以不需要"子层走了要恢复什么"
+//                         折叠态与滚动位置都在
+//     p/{pid}/docs/{id|}  文档位层 —— 唯一随文档切换重建的那一层:编辑器(views/doc-editor.js)
+//                         或"未选文档"空态
+//
+//   文档树只出现在壳的左栏(#side-doc-tree),主区不再有第二棵树;离开文档模块时
+//   本层把左栏槽位清空(数据的生命期 = 区域的生存期)。
 //
 //   作用域契约见 ARCHITECTURE.md「渲染契约」。
 window.Views = window.Views || {};
 (function () {
   'use strict';
 
-  // 折叠态按项目记(与侧栏 treeExpanded 同一口径):离开文档模块再回来不收回。
+  // 折叠态按项目记(与侧栏展开态同一口径):离开文档模块再回来不收回。
   // 它是用户的选择,不是可以被重新渲染出来的派生值
   const collapsedByProject = new Map();
 
-  /**
-   * 文档模块的骨架:冷进项目、项目对象还没到手时铺它 —— 形状与真布局逐块对应
-   * (左树列、右编辑区),数据到达时就地替换,眼睛不用重新找位置。
-   * 文档页的列结构知识只在本模块里,别处不另抄一份(抄的那份一定会漂)。
-   * 树列的开关态取 UI.panelOpenByDefault(与状态机同一判定):少了它,树列按默认的
-   * "关"渲染成 0 宽,骨架就会先满幅、等真面板挂上再跳一下
-   */
+  /** 文档模块的骨架:主区只有编辑位(树在左栏,由本模块的 render 填充) */
   window.Views.docsSkeleton = function () {
-    const open = UI.panelOpenByDefault('td:tree-open');
-    return '<div class="docs-wrap' + (open ? ' tree-open' : '') + '">' +
-      '<div class="doc-tree-col"><div class="doc-tree-inner">' + UI.skeleton('rows', 6) + '</div></div>' +
-      '<div class="doc-editor-col"><div class="editor-canvas"><div class="doc-content">' +
+    return '<div class="doc-editor-col"><div class="editor-canvas"><div class="doc-content">' +
       UI.skeleton('lines', 8) +
-      '</div></div></div>' +
-      '</div>';
+      '</div></div></div>';
   };
 
   window.Views.docsLevel = function (r) {
     const pid = r.pid;
     const proj = r.proj;
-    const canEdit = UI.canEdit(proj);   // EDITOR 及以上可写;VIEWER 只读,未加入者在项目层就被拦下
+    const canEdit = UI.canEdit(proj);   // EDITOR 及以上可写;VIEWER 只读
     const collapsed = collapsedByProject.get(pid) || new Set();
     collapsedByProject.set(pid, collapsed);
 
     let treeData = [];
-    let wrap = null;
     let treeEl = null;
-    let panel = null;   // 树面板双态(宽屏内联 / 窄屏抽屉)
+    let sideHost = null;
 
-    /**
-     * 当前打开的文档 id:**现读当前路由**,不闭包快照 —— 本层在切文档时不重建,
-     * 闭包里的 id 会停在第一次的值(见「渲染契约」第 2 条)。
-     */
+    /** 当前打开的文档 id:**现读当前路由**,不闭包快照 */
     function docId() {
       const cur = Route.current();
       return cur && cur.pid === pid ? cur.docId : null;
@@ -61,23 +50,36 @@ window.Views = window.Views || {};
       return hit;
     }
 
-    // 渲染与交互(caret 折叠 / 行导航 / 行内按钮)都在 doc-tree.js 的 DocTree 里
+    /** 打开文档时展开其全部祖先:从收藏/命令面板/直链打开的深层文档也必须可见 */
+    function expandAncestors(id) {
+      if (id == null) return;
+      let trail = null;
+      UI.walkTree(treeData, (n, t) => {
+        if (n.id === id) { trail = t; return false; }
+      });
+      if (!trail) return;
+      trail.slice(0, -1).forEach((n) => collapsed.delete(n.id));
+    }
+
     function renderTree() {
+      if (!treeEl) return;
+      const active = docId();
+      expandAncestors(active);
       DocTree.renderTreeInto(treeEl, {
-        treeData, activeId: docId(), collapsed, canEdit,
+        treeData, activeId: active, collapsed, canEdit,
         callbacks: {
           onNav: (id) => {
-            // 点的就是当前文档:hash 不会变、页面不会重渲;抽屉形态下要自己收(宽屏内联不受影响)
-            if (id === docId()) {
-              if (panel.isNarrow()) panel.close();
-              return;
-            }
+            if (id === docId()) return;
+            const node = findNode(id);
+            App.recordView(pid, id, node && node.title);
             location.hash = App.route.project(pid, 'docs', id);
           },
           onAdd: (parentId) => createDoc(parentId),
           onMenu: (btn, id) => openDocMenu(btn, id),
         },
       });
+      // 高亮行可能落在树的折叠区或滚动区外:展开祖先并滚到可见
+      DocTree.reveal(treeEl, active, collapsed);
     }
 
     async function loadTree() {
@@ -85,7 +87,7 @@ window.Views = window.Views || {};
         treeData = await api(Endpoints.docTree(pid)) || [];
         renderTree();
       } catch (e) {
-        treeEl.innerHTML = UI.banner({ kind: 'danger', icon: 'error-warning-line', text: e.message, sm: true, cls: 'm-2' });
+        if (treeEl) treeEl.innerHTML = UI.error(e, { sm: true, cls: 'm-2' });
       }
     }
 
@@ -99,47 +101,54 @@ window.Views = window.Views || {};
       } catch (e) { UI.err(e); }
     }
 
-    /** 「更多」下拉:重命名 / 移动到… / 删除;id 已由 DocTree 用 UI.idOf 过形状 */
+    /** 「更多」下拉:收藏 / 重命名 / 移动到… / 删除;id 已由 DocTree 用 UI.idOf 过形状 */
     function openDocMenu(btn, id) {
       const node = findNode(id);
+      const title = node ? node.title : '';
       UI.dropdownMenu(btn, [
         {
+          icon: Favorites.has(id) ? 'star-fill' : 'star-line',
+          label: Favorites.has(id) ? '取消收藏' : '收藏',
+          onClick: () => {
+            Favorites.toggle({ id, projectId: pid, title });
+            UI.toast(Favorites.has(id) ? '已收藏' : '已取消收藏', 'success');
+          },
+        },
+        {
           icon: 'ri-edit-line', label: '重命名', onClick: async () => {
-            const title = await UI.inputDialog({ title: '重命名文档', label: '标题', value: node ? node.title : '' });
-            if (!title) return;
+            const next = await UI.inputDialog({ title: '重命名文档', label: '标题', value: title });
+            if (!next) return;
             try {
-              await api(Endpoints.doc(id), { method: 'PATCH', body: { title } });
+              await api(Endpoints.doc(id), { method: 'PATCH', body: { title: next } });
               await loadTree();
-              // 当前打开的那篇:编辑头的标题跟着改(它归文档位层,这里只改它已渲染的输入框)
               if (id === docId()) {
-                const t = wrap.querySelector('#doc-title');
-                if (t) t.value = title;
+                const t = document.querySelector('#doc-title');
+                if (t) t.value = next;
               }
             } catch (err) { UI.err(err); }
           },
         },
         {
           icon: 'ri-folder-transfer-line', label: '移动到…', onClick: () => {
-            // 选择器与云空间共用(MoveTarget):项目内改父级、跨项目转移走同一个端点。
-            // 跨项目会跳转路由 —— 文档的 projectId 变了,留在旧路由上会立刻 404
             MoveTarget.open({
-              item: { id, name: node ? node.title : '' }, kind: 'doc', projectId: pid,
+              item: { id, name: title }, kind: 'doc', projectId: pid,
               parentId: (node && node.parentId) || null,
               onDone: async (res) => {
                 if (!res || res.projectId === pid) { await loadTree(); return; }
                 window.location.hash = App.route.project(res.projectId, 'docs', res.id);
-                App.refreshSidebar();
+                App.loadSpaces(true).catch(() => {});
               },
             });
           },
         },
         {
           icon: 'ri-delete-bin-line', label: '删除', danger: true, onClick: async () => {
-            const ok = await UI.confirmDialog('删除后进入回收站,可在项目「回收站」中恢复。确定删除「' + (node ? node.title : '') + '」?');
+            const ok = await UI.confirmDialog('删除后进入回收站,可在空间「回收站」中恢复。确定删除「' + title + '」?');
             if (!ok) return;
             try {
               await api(Endpoints.doc(id), { method: 'DELETE' });
               UI.toast('已删除(可在回收站恢复)', 'success');
+              Favorites.remove(id);
               await loadTree();
               if (id === docId()) location.hash = App.route.project(pid, 'docs');
             } catch (err) { UI.err(err); }
@@ -149,71 +158,57 @@ window.Views = window.Views || {};
       btn.click();
     }
 
-    /** 开关按钮在编辑头里(随文档位重建),标题随状态变化(状态机每次置位后回调) */
-    function syncTreeToggle(p) {
-      const b = wrap && wrap.querySelector('#btn-doc-tree');
-      if (!b) return;
-      b.title = p.isOpen() ? '收起文档列表' : '展开文档列表';
-    }
-
     return {
       key: 'p/' + pid + '/docs',
       render(ctx) {
-        const frag = Scope.html(
-          '<div class="docs-wrap">' +
-          // 遮罩只服务窄屏抽屉(显示条件在 CSS 的 .docs-wrap.tree-open 规则里);视觉走 .scrim 基类
-          '<div class="scrim doc-tree-scrim"></div>' +
-          // 列框(.doc-tree-col)只是裁剪框,宽度与水平内边距归内容层 .doc-tree-inner(app.css)
-          '<div class="doc-tree-col">' +
-          '<div class="doc-tree-inner">' +
-          UI.toolbar({
-            cls: 'doc-tree-head',
-            left: '<span class="toolbar-title">文档</span>',
-            right: canEdit ? UI.btn({ id: 'btn-new-doc', label: '新文档', icon: 'add-line', kind: 'tonal', size: 'sm' }) : '',
-          }) +
-          '<div id="doc-tree" class="doc-tree">' + UI.skeleton('rows', 6) + '</div></div></div>' +
-          '<div class="doc-editor-col" id="doc-editor-col"></div>' +
-          '</div>');
-
-        wrap = frag.querySelector('.docs-wrap');
-        treeEl = frag.querySelector('#doc-tree');
+        sideHost = document.getElementById('side-doc-tree');
+        const frag = Scope.html('<div class="doc-editor-col" id="doc-editor-col"></div>');
         const editorCol = frag.querySelector('#doc-editor-col');
 
-        // 面板监听挂在 document/UI.NARROW 上,本层被换掉时必须销毁,否则闭包会操纵旧节点
-        panel = UI.dualPanel({
-          el: wrap,
-          openCls: 'tree-open',
-          prefKey: 'td:tree-open',
-          onChange: syncTreeToggle,
-        });
-        ctx.dispose(panel.destroy);
-        wrap.querySelector('.doc-tree-scrim').addEventListener('click', panel.close);
-
-        const newDocBtn = frag.querySelector('#btn-new-doc');
-        if (newDocBtn) newDocBtn.onclick = () => createDoc(null);
+        if (sideHost) {
+          sideHost.innerHTML =
+            '<div class="side-doc-head">' +
+            '<span class="side-doc-title">文档</span>' +
+            (canEdit ? UI.iconBtn({ id: 'btn-new-doc', icon: 'add-line', title: '新建文档' }) : '') +
+            '</div>' +
+            '<div id="doc-tree" class="doc-tree">' + UI.skeleton('rows', 6) + '</div>';
+          treeEl = sideHost.querySelector('#doc-tree');
+          const newDocBtn = sideHost.querySelector('#btn-new-doc');
+          if (newDocBtn) newDocBtn.onclick = () => createDoc(null);
+          ctx.dispose(() => {
+            sideHost.innerHTML = '';
+            sideHost = null;
+            treeEl = null;
+          });
+        } else {
+          treeEl = null;
+        }
 
         loadTree();
         // 文档位立刻挂上:编辑器骨架(或空态)这一帧就位,正文到了就地填
         ctx.mount(editorCol);
-        // 编辑头由子层同步建好,晚于状态机首次置位 —— 补一次回调,让开关按钮语义就位
-        panel.refresh();
         return frag;
       },
-      // 文档位描述在挂载那一刻产出:读当前路由拿 docId,并带上本层的运行时(回调、面板)
+      // 文档位描述在挂载那一刻产出:读当前路由拿 docId,并带上本层的运行时
       child() {
         const id = docId();
+        App.recordView(pid, id, (findNode(id) || {}).title);
         const shared = {
           pid, canEdit, createDoc, onTreeChanged: loadTree,
-          onTreeToggle: panel.toggle,
           // 标题的即取值:文档树里已经有它,编辑器第一帧就能显示正确的标题
           docTitle: () => (findNode(id) || {}).title,
         };
         return id
           ? DocEditorView.level(Object.assign({ docId: id }, shared))
-          : unopenedSlot(Object.assign({}, shared, { docId: null, panel: panel }));
+          : unopenedSlot(Object.assign({}, shared, { docId: null }));
       },
-      // 子层换人:原地移动高亮行(重绘整棵树会丢滚动位置)
-      onChild(props) { DocTree.setActive(treeEl, props.docId); },
+      // 子层换人:只移动高亮行;若目标在折叠区里,顺带展开祖先并滚到可见(不重建树)
+      onChild(props) {
+        const id = props && props.docId != null ? props.docId : null;
+        if (id != null) expandAncestors(id);
+        DocTree.setActive(treeEl, id);
+        DocTree.reveal(treeEl, id, collapsed);
+      },
     };
   };
 
@@ -226,18 +221,12 @@ window.Views = window.Views || {};
       key: 'p/' + o.pid + '/docs/-',
       props: { docId: null },
       render() {
-        // 空态主行动随状态走,保证任何状态下都有明确出路:
-        //   树关着(窄屏首载/用户收起)→「打开文档列表」直达开关;
-        //   树开着且可写 →「新建文档」兑现 desc 的预告(列表已在左侧,不缺入口);
-        //   树开着只读 → 无行动,从左侧列表选择即可
         const frag = Scope.html('');
-        frag.appendChild(UI.emptyState({
+        frag.appendChild(UI.empty({
           icon: 'edit-box-line',
           title: '选择一篇文档',
-          desc: o.panel.isOpen() && o.canEdit ? '或者创建一篇新文档' : '',
-          action: !o.panel.isOpen()
-            ? { label: '打开文档列表', onClick: o.panel.toggle }
-            : (o.canEdit ? { label: '新建文档', onClick: () => o.createDoc(null) } : null),
+          desc: o.canEdit ? '或者从左侧文档树新建一篇' : '',
+          action: o.canEdit ? { label: '新建文档', onClick: () => o.createDoc(null) } : null,
         }));
         return frag;
       },

@@ -9,7 +9,7 @@
 同事目录给全员看,所以刻意不含 isAdmin;分享 token 是凭据,只该出现在单文件详情里,
 不该随列表批量下发。
 
-依赖方向:本模块只 import models 与 media。它被 auth / projects / admin 等 import,
+依赖方向:本模块只 import media。它被 routers 与 services 等 import,
 自己不能再 import 它们(会成环)。需要查库才能算出的字段(myRole、isMember、
 location)由调用方算好传进来。
 """
@@ -27,14 +27,18 @@ def iso(dt) -> str | None:
     return dt.isoformat() if dt else None
 
 
-# 头像颜色:由 user id 哈希在固定调色板中取色(确定性,不落库 —— 它不是用户的属性,
-# 而是 id 的呈现,所以没有对应的列)。
+# 头像颜色:用户可自定义；未设置时由 user id 哈希在固定调色板中取色（确定性回落）。
 _PALETTE = ["#3370ff", "#7c3aed", "#db2777", "#ea580c", "#16a34a", "#0891b2", "#ca8a04", "#1f6feb"]
 
 
 def avatar_color(user_id: str) -> str:
     h = int(hashlib.md5(str(user_id).encode("utf-8")).hexdigest(), 16)
     return _PALETTE[h % len(_PALETTE)]
+
+
+def avatar_color_for(user) -> str:
+    """用户实际展示色：自定义色优先，未设置时沿用 id 派生色。"""
+    return user.avatar_color or avatar_color(user.id)
 
 
 _BROWSER_TOKENS = (("Edg", "Edge"), ("OPR", "Opera"), ("Firefox", "Firefox"),
@@ -60,6 +64,32 @@ def describe_ua(ua: str) -> tuple[str, str]:
     return label, kind
 
 
+# ---------- 登录会话 ----------
+
+def session_ref(token: str) -> str:
+    """公开的会话标识:sha256(token)。能指认会话，却无法反推成凭据。"""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def session_json(sess, *, online: bool, current_token: str | None = None,
+                 include_user_agent: bool = False) -> dict:
+    """会话行。管理端额外给 userAgent；本人会话列表按接口契约不暴露原始 UA。
+
+    online 由调用方按 security.sessions.ONLINE_WINDOW_SECONDS 判定后传入：
+    本模块不依赖 security，避免把"多久算在线"复制成第二份知识。
+    """
+    label, kind = describe_ua(sess.user_agent or "")
+    out = {"ref": session_ref(sess.token),
+           "ip": sess.ip, "device": label, "deviceKind": kind,
+           "createdAt": iso(sess.created_at),
+           "lastSeenAt": iso(sess.last_seen_at), "expiresAt": iso(sess.expires_at),
+           "online": bool(online),
+           "current": bool(current_token and sess.token == current_token)}
+    if include_user_agent:
+        out["userAgent"] = sess.user_agent
+    return out
+
+
 # ---------- 用户 ----------
 
 def user_json(u, *, face: str = "self") -> dict:
@@ -73,20 +103,20 @@ def user_json(u, *, face: str = "self") -> dict:
     """
     if face == "self":
         return {"id": u.id, "email": u.email, "name": u.name,
-                "isAdmin": bool(u.is_admin), "avatarColor": avatar_color(u.id)}
+                "isAdmin": bool(u.is_admin), "avatarColor": avatar_color_for(u)}
     if face == "dir":
         return {"id": u.id, "name": u.name, "email": u.email,
-                "avatarColor": avatar_color(u.id)}
+                "avatarColor": avatar_color_for(u)}
     if face == "member":
         return {"id": u.id, "email": u.email, "name": u.name,
-                "isDisabled": bool(u.is_disabled), "avatarColor": avatar_color(u.id)}
+                "isDisabled": bool(u.is_disabled), "avatarColor": avatar_color_for(u)}
     if face == "access":
         return {"id": u.id, "email": u.email, "name": u.name,
                 "isAdmin": bool(u.is_admin), "isDisabled": bool(u.is_disabled)}
     if face == "admin":
         return {"id": u.id, "email": u.email, "name": u.name,
                 "isAdmin": bool(u.is_admin), "isDisabled": bool(u.is_disabled),
-                "avatarColor": avatar_color(u.id), "createdAt": iso(u.created_at)}
+                "avatarColor": avatar_color_for(u), "createdAt": iso(u.created_at)}
     raise ValueError(f"未知的 user face: {face}")
 
 
@@ -114,16 +144,21 @@ def project_json(p, *, face: str = "member", my_role: str | None = None,
             # isMember = 真实成员关系(管理员与未加入者都是 false)。前端据此渲染
             # 「退出项目」这类只对真成员成立的入口;而"能不能进这个项目"一律看 myRole
             "isMember": is_member,
+            "color": p.color, "quotaBytes": p.quota_bytes,
+            "archivedAt": iso(p.archived_at),
             "createdAt": iso(p.created_at),
             "lastUpdatedAt": iso(last),
             "myRole": my_role,
             "memberCount": s.get("memberCount", 0),
             "docCount": s.get("docCount", 0),
+            "storageBytes": s.get("storageBytes", 0),
         }
     if face == "admin":
         return {
             "id": p.id, "name": p.name, "description": p.description,
             "isPublic": p.visibility == "public",
+            "color": p.color, "quotaBytes": p.quota_bytes,
+            "archivedAt": iso(p.archived_at),
             "createdAt": iso(p.created_at),
             "lastUpdatedAt": iso(last),
             "memberCount": s.get("memberCount", 0),
@@ -195,7 +230,8 @@ def file_json(f, *, face: str = "self", created_by=None, referenced: bool = Fals
     mime = guess_mime(f.name or "")
     out = {"id": f.id, "name": f.name, "mime": mime, "size": f.size,
            "canInline": can_inline(mime), "isText": is_text(mime),
-           "shared": bool(f.share_token),
+           "shared": bool(f.share_token), "version": f.version,
+           "updatedBy": f.updated_by, "updatedAt": iso(f.updated_at),
            "createdAt": iso(f.created_at)}
     if face == "self":
         return out
@@ -210,6 +246,19 @@ def file_json(f, *, face: str = "self", created_by=None, referenced: bool = Fals
                 "shareExpiresAt": iso(f.share_expires_at),
                 "location": location}
     raise ValueError(f"未知的 file face: {face}")
+
+
+def file_version_json(v, *, author_name: str | None = None) -> dict:
+    return {"version": v.version, "size": v.size, "note": v.note,
+            "createdAt": iso(v.created_at), "createdBy": v.created_by,
+            "createdByName": author_name}
+
+
+def historical_file_json(f, v) -> dict:
+    out = file_json(f)
+    out.update({"size": v.size, "version": v.version,
+                "updatedBy": v.created_by, "updatedAt": iso(v.created_at)})
+    return out
 
 
 def folder_json(f, *, face: str = "self") -> dict:

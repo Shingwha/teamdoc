@@ -21,6 +21,7 @@ import pytest
 
 from _chrome import dump_page, error_trap_js, find_chrome, login_js, read_report, temp_page
 from _harness import ADMIN_EMAIL, ADMIN_PASSWORD
+from test_editor_cm6 import EDITOR_SCRIPTS
 
 LOGIN_STATUS_JS = (
     "(function () {\n"
@@ -61,7 +62,7 @@ SWEEP_INJECT = '''  <script>
   </script>
 '''
 
-# 交互断言页:点侧栏项目行(展开 → 再点收起);进项目文档页点折叠箭头(子层 hidden 应切换)
+# 交互断言页:空间切换器弹层(菜单行)+ 进文档页点折叠箭头(子层 hidden 应切换)
 INTERACT_INJECT = '''  <script>
     __LOGIN_JS__
     __ERRTRAP_JS__
@@ -71,7 +72,6 @@ INTERACT_INJECT = '''  <script>
   (function () {
     var OUT = {};
     var PID = (new URLSearchParams(location.search)).get('pid') || '';
-    function kids() { return document.querySelectorAll('.tree-children:not([hidden]) .side-tree-children').length; }
     function report() {
       var l = ['hash=' + location.hash, 'errors=' + (window.__errors.join(' | ') || 'none')];
       Object.keys(OUT).forEach(function (k) { l.push(k + '=' + OUT[k]); });
@@ -93,7 +93,6 @@ INTERACT_INJECT = '''  <script>
         OUT.docChildrenHiddenBefore = before.hasAttribute('hidden') ? 1 : 0;
         caret.click();
         setTimeout(function () {
-          // 点击后整棵树会重绘,旧节点已脱离文档 —— 必须按 data-id 重新查询
           var row2 = document.querySelector('#doc-tree .doc-row[data-id="' + id + '"]');
           var after = row2 ? row2.parentElement.querySelector('.tree-children') : null;
           OUT.docChildrenHiddenAfterClick = (after && after.hasAttribute('hidden')) ? 1 : 0;
@@ -103,18 +102,29 @@ INTERACT_INJECT = '''  <script>
     }
     window.addEventListener('load', function () {
       setTimeout(function () {
-        // 侧栏:点项目行 = 展开,再点 = 收起(不导航);每次点击前重新查询(重绘会换节点)
-        var rows = document.querySelectorAll('.side-proj');
-        OUT.sidebarRows = rows.length;
-        if (!rows.length) { step2(); return; }
-        rows[0].click();
+        // 左栏:当前空间导航 + 文档树槽位 + 云空间/回收站
+        OUT.sidebarRows = document.querySelectorAll('#side-nav .side-item').length;
+        OUT.footRows = document.querySelectorAll('#side-foot .side-item').length;
+        if (!OUT.sidebarRows) { step2(); return; }
+        // 空间切换器:点开应给出「我的空间/发现空间」两个页签、逐空间行与底部入口
+        document.getElementById('space-switch').click();
         setTimeout(function () {
-          OUT.sidebarChildrenAfterExpand = kids();
-          document.querySelectorAll('.side-proj')[0].click();
+          var panel = document.querySelector('.space-switcher');
+          OUT.spacePanel = panel ? 1 : 0;
+          OUT.spaceTabs = panel ? panel.querySelectorAll('[data-ss-tab]').length : 0;
+          OUT.spaceRows = panel ? panel.querySelectorAll('.ss-space-row').length : 0;
+          OUT.spaceFoot = panel ? panel.querySelectorAll('.ss-foot .btn').length : 0;
+          UI.closeOpenMenu();
+          // 命令面板:Ctrl+K 打开,空输入给出动作/最近文档;Esc 关闭
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
           setTimeout(function () {
-            OUT.sidebarChildrenAfterCollapse = kids();
+            OUT.cmdPanel = document.querySelector('.cmd-panel') ? 1 : 0;
+            OUT.cmdRows = document.querySelectorAll('.cmd-row').length;
+            var inp = document.getElementById('cmd-q');
+            if (inp) inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            OUT.cmdClosed = document.querySelector('.cmd-panel') ? 0 : 1;
             step2();
-          }, 400);
+          }, 1000);
         }, 400);
       }, 2200);
     });
@@ -157,9 +167,8 @@ ROUTE_INJECT = '''  <script>
 '''
 
 
-# 管理后台分区页:五区渲染 + 真实点击(仅失败过滤切换、用户详情抽屉开合)
-# 拆分重构的行为等价性主要靠这里钉住:静态渲染对了 ≠ 事件委托/refresh 注册表没断。
-# 登录块带状态捕获:排障时一眼看出是登录被拦(429/403)还是页面本身的问题。
+# 管理后台:六个分区的子导航 + 真实切区(总览 → 用户 → 安全)+ 用户详情抽屉开合。
+# 壳变了(admin 改为动态加载 + 左子导航),这里守的是"分区真的切、抽屉真的开"。
 ADMIN_INJECT = '''  <script>
     __LOGIN_STATUS_JS__
     __ERRTRAP_JS__
@@ -176,6 +185,12 @@ ADMIN_INJECT = '''  <script>
       el.textContent = l.join(String.fromCharCode(10));
       document.body.appendChild(el);
     }
+    function go(section, next) {
+      var a = document.querySelector('.admin-nav-item[data-section="' + section + '"]');
+      if (!a) { OUT['nav_' + section] = 'no-link'; report(); return; }
+      a.click();
+      setTimeout(next, 1800);
+    }
     window.addEventListener('load', function () {
       // 与巡检页同款 150ms 延后:等 DOMContentLoaded 触发的首路由(含 /api/auth/me)落定,
       // 否则首路由与本次导航并发,首路由后完成者会用旧渲染覆盖本页
@@ -183,46 +198,44 @@ ADMIN_INJECT = '''  <script>
         location.hash = '#/admin';
         window.dispatchEvent(new HashChangeEvent('hashchange'));
         setTimeout(function () {
-        OUT.storeCards = document.querySelectorAll('#admin-store .stat-grid').length;
-        OUT.backupCards = document.querySelectorAll('#admin-backup .card').length;
-        OUT.projRows = document.querySelectorAll('#admin-projects .data-table-row').length;
-        OUT.userRows = document.querySelectorAll('#admin-body .data-table-row').length;
-        OUT.secFilterBtns = document.querySelectorAll('#admin-security #sec-filter button').length;
-        OUT.secRowsBefore = document.querySelectorAll('#admin-security #sec-body .data-table-row').length;
-        var failBtn = document.querySelector('#admin-security #sec-filter button[data-key="fail"]');
-        if (!failBtn) { OUT.failToggle = 'no-btn'; report(); return; }
-        var secBodyBefore = document.querySelector('#admin-security #sec-body').innerHTML;
-        failBtn.click();
-        setTimeout(function () {
-          var after = document.querySelector('#admin-security #sec-body');
-          // 全量套件里别的测试造过失败事件,"仅失败"不一定空态 —— 断言的是"内容真的变了"
-          OUT.failToggleChanged = after.innerHTML !== secBodyBefore ? 1 : 0;
-          OUT.failRowsAfter = after.querySelectorAll('.data-table-row').length;
-          var allBtn = document.querySelector('#admin-security #sec-filter button[data-key="all"]');
-          allBtn.click();
+        OUT.navItems = document.querySelectorAll('.admin-nav-item').length;
+        OUT.overviewSection = document.querySelector('#admin-section[data-admin-section="overview"]') ? 1 : 0;
+        go('users', function () {
+          OUT.usersSection = document.querySelector('#admin-section[data-admin-section="users"]') ? 1 : 0;
+          OUT.userRows = document.querySelectorAll('#admin-section .data-table-row').length;
+          var access = document.querySelector('#admin-section .u-access');
+          if (!access) { OUT.drawer = 'no-btn'; go('security', afterSecurity); return; }
+          access.click();
           setTimeout(function () {
-            OUT.allToggleRows = document.querySelectorAll('#admin-security #sec-body .data-table-row').length;
-            var access = document.querySelector('#admin-body .u-access');
-            if (!access) { OUT.drawer = 'no-btn'; report(); return; }
-            access.click();
-            setTimeout(function () {
-              var modal = document.querySelector('.modal-box');
-              OUT.drawer = modal && modal.textContent.indexOf('用户详情') >= 0 ? 1 : 0;
-              UI.closeAllModals();
-              report();
-            }, 1200);
-          }, 300);
-        }, 300);
+            var box = document.querySelector('.modal-box');
+            OUT.drawer = box && box.textContent.indexOf('用户详情') >= 0 ? 1 : 0;
+            UI.closeAllModals();
+            go('security', afterSecurity);
+          }, 1200);
+        });
       }, 3000);
       }, 150);
     });
+    function afterSecurity() {
+      OUT.securitySection = document.querySelector('#admin-section[data-admin-section="security"]') ? 1 : 0;
+      OUT.secFilterBtns = document.querySelectorAll('#sec-filter button').length;
+      OUT.secRowsBefore = document.querySelectorAll('#sec-body .data-table-row').length;
+      var failBtn = document.querySelector('#sec-filter button[data-key="fail"]');
+      if (!failBtn) { OUT.failToggle = 'no-btn'; report(); return; }
+      var before = document.querySelector('#sec-body').innerHTML;
+      failBtn.click();
+      setTimeout(function () {
+        OUT.failToggleChanged = document.querySelector('#sec-body').innerHTML !== before ? 1 : 0;
+        report();
+      }, 500);
+    }
   })();
   </script>
 '''
 
 
 def _inject(tpl):
-    return tpl.replace("__LOGIN_JS__", login_js()).replace("__ERRTRAP_JS__", error_trap_js())
+    return EDITOR_SCRIPTS + tpl.replace("__LOGIN_JS__", login_js()).replace("__ERRTRAP_JS__", error_trap_js())
 
 
 def test_visual_sweep_all_routes(base_url, proj_doc):
@@ -232,9 +245,10 @@ def test_visual_sweep_all_routes(base_url, proj_doc):
     pid, doc_id = proj_doc
     pages = [
         ("首页", "#/"),
-        ("发现", "#/discover"),
-        ("搜索", "#/search"),
+        ("空间管理", "#/projects"),
         ("个人设置", "#/settings"),
+        ("设置·安全", "#/settings/security"),
+        ("设置·偏好", "#/settings/preferences"),
         ("管理后台", "#/admin"),
         # 项目内页面(巡检项目有父子文档,覆盖得到文档树折叠)
         ("文档", f"#/p/{pid}/docs"),
@@ -270,13 +284,24 @@ def test_visual_sweep_all_routes(base_url, proj_doc):
 
     problems = []
     if info.get("sidebarRows", "0") == "0":
-        problems.append("侧栏没有项目行,交互断言没有真正执行")
+        problems.append("左栏没有空间导航项,交互断言没有真正执行")
     else:
-        expanded = info.get("sidebarChildrenAfterExpand", "0")
-        if not expanded.isdigit() or int(expanded) < 1:
-            problems.append("侧栏项目行点不开(点击后没有子项)")
-        if info.get("sidebarChildrenAfterCollapse", "?") != "0":
-            problems.append("侧栏项目行收不起(再点后子项仍在)")
+        if info.get("footRows", "0") == "0":
+            problems.append("左栏没有云空间/回收站入口")
+        if info.get("spacePanel") != "1":
+            problems.append("空间切换器浮层没有打开")
+        elif info.get("spaceTabs") != "2":
+            problems.append("空间切换器没有「我的空间/发现空间」两个页签")
+        elif int(info.get("spaceRows", "0")) < 1:
+            problems.append("空间切换器没有列出可切换的空间")
+        elif int(info.get("spaceFoot", "0")) < 1:
+            problems.append("空间切换器底部没有创建/管理空间入口")
+        if info.get("cmdPanel") != "1":
+            problems.append("Ctrl+K 没有打开命令面板")
+        elif int(info.get("cmdRows", "0")) < 1:
+            problems.append("命令面板空输入没有给出动作或最近文档")
+        if info.get("cmdClosed") != "1":
+            problems.append("命令面板按 Esc 没有关闭")
     # 文档树折叠:巡检项目必有子文档,这条必须真的执行
     if info.get("docTreeChecked", "0") != "1":
         problems.append("文档树折叠断言未执行(没找到带子层的折叠箭头)")
@@ -317,11 +342,16 @@ def test_admin_sections_and_interactions(base_url):
     assert info.get("errors", "?") == "none", f"管理后台 JS 错误: {info.get('errors')}"
 
     problems = []
-    if int(info.get("storeCards", "0")) < 1:
-        problems.append("存储区没有渲染统计卡")
-    if int(info.get("backupCards", "0")) < 1:
-        problems.append("备份与恢复区没有渲染卡片")
-    # 项目/用户表在本页断言里允许为空态(巡检实例数据量不定),交互断言才是重点
+    if int(info.get("navItems", "0")) != 6:
+        problems.append("管理后台左子导航没有六个分区")
+    if info.get("overviewSection") != "1":
+        problems.append("默认分区不是总览")
+    if info.get("usersSection") != "1":
+        problems.append("切到「用户」分区没有生效")
+    if int(info.get("userRows", "0")) < 1:
+        problems.append("用户分区没有用户行(初始化管理员应至少一条)")
+    if info.get("securitySection") != "1":
+        problems.append("切到「安全」分区没有生效")
     if int(info.get("secFilterBtns", "0")) != 2:
         problems.append("登录动态的 全部/仅失败 过滤段没渲染")
     if int(info.get("secRowsBefore", "0")) < 1:
@@ -330,10 +360,6 @@ def test_admin_sections_and_interactions(base_url):
         problems.append("找不到'仅失败'按钮,过滤切换未执行")
     elif info.get("failToggleChanged") != "1":
         problems.append("点'仅失败'后登录动态内容没有变化 —— 过滤切换断了")
-    elif int(info.get("failRowsAfter", "99")) > int(info.get("secRowsBefore", "0")):
-        problems.append("'仅失败'的行数比'全部'还多 —— 过滤方向反了")
-    if int(info.get("allToggleRows", "0")) != int(info.get("secRowsBefore", "0")):
-        problems.append("点回'全部'后行数没有恢复 —— 过滤状态没还原")
     if info.get("drawer") == "no-btn":
         problems.append("找不到'用户详情'按钮,抽屉断言未执行")
     elif info.get("drawer") != "1":

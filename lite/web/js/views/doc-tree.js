@@ -96,10 +96,42 @@ window.DocTree = (function () {
 
   /** 原地移动高亮行:切换文档只动 class 就够了(整树重绘连滚动位置都会丢) */
   function setActive(el, id) {
+    if (!el) return;
     el.querySelectorAll('.doc-row').forEach((row) => {
       row.classList.toggle('active', UI.idOf(row.dataset.id) === id);
     });
   }
 
-  return { renderTreeInto: renderTreeInto, setActive: setActive };
+  /** 把行滚进树的可视区。只滚树容器本身,不用 scrollIntoView(它会连带滚动祖先) */
+  function scrollRowIntoView(el, row) {
+    const lr = el.getBoundingClientRect();
+    const rr = row.getBoundingClientRect();
+    if (rr.top < lr.top) el.scrollTop -= lr.top - rr.top;
+    else if (rr.bottom > lr.bottom) el.scrollTop += rr.bottom - lr.bottom;
+  }
+
+  /**
+   * 展开目标行的全部祖先并滚到可见;只改现有节点,不重建树。
+   * collapsed 传入时同步移除祖先的折叠键,后续重渲仍保持展开。
+   * @returns {boolean} 目标行是否存在
+   */
+  function reveal(el, id, collapsed) {
+    if (!el || id == null) return false;
+    const row = el.querySelector('.doc-row[data-id="' + String(id) + '"]');
+    if (!row) return false;
+    let kids = row.closest('.tree-children');
+    while (kids) {
+      kids.hidden = false;
+      const node = kids.parentElement;
+      const prow = node ? node.querySelector('.tree-row') : null;
+      const caret = prow ? prow.querySelector('.tree-caret') : null;
+      if (caret) caret.classList.add('open');
+      if (collapsed && prow) collapsed.delete(UI.idOf(prow.dataset.id));
+      kids = node && node.parentElement ? node.parentElement.closest('.tree-children') : null;
+    }
+    scrollRowIntoView(el, row);
+    return true;
+  }
+
+  return { renderTreeInto: renderTreeInto, setActive: setActive, reveal: reveal };
 })();

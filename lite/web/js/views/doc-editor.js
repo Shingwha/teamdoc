@@ -1,5 +1,5 @@
 // views/doc-editor.js — 文档位作用域(#/p/{id}/docs/{docId}):编辑器与历史版本模态
-//   DocEditorView.level({docId, pid, canEdit, onTreeToggle, onTreeChanged, docTitle})
+//   DocEditorView.level({docId, pid, canEdit, onTreeChanged, docTitle})
 //     → 作用域描述(见 ARCHITECTURE「渲染契约」):编辑器是**唯一随切文档重建的那一层**,
 //     外面的侧栏、文档树、项目对象都不动。功能:手动保存(按钮 / Ctrl+S)、编辑/预览切换、
 //     WS 实时协同、反链栏、粘贴拖拽上传、离开前未保存提示、冲突逐块合并
@@ -22,136 +22,154 @@ window.DocEditorView = (function () {
   }
 
   // ---------- 编辑器 + 实时协同 ----------
-  function open(ctx, { docId, pid: projectId, canEdit, docTitle, onTreeChanged, onTreeToggle }) {
+  function open(ctx, { docId, pid: projectId, canEdit, docTitle, onTreeChanged }) {
     const frag = Scope.html(
       '<div class="editor-head">' +
-      // 文档树开关(树面板双态的唯一的切换入口,状态机在 project.js):宽屏收起/展开树列,窄屏开关抽屉。
-      // 三横线:与壳侧栏折叠钮(side-bar-line)区分 —— 那边管的是壳,这边管的是文档树面板
-      (onTreeToggle ? UI.iconBtn({ id: 'btn-doc-tree', icon: 'menu-2-line', title: '收起文档列表' }) : '') +
-      // 标题不在这里:它是正文列的第一个块(与正文同宽同起点,随文档滚动),见下方 doc-content。
-      // 顶栏两区:左 = 树开关;右 = .head-tools 工具组(margin-left:auto 推右,
-      // 任何屏宽都存在 —— 不能靠 save-status 推右,它在 ≤720 是隐藏的)
       '<div class="head-tools">' +
-      '<span class="save-status" id="save-status"></span>' +
-      (canEdit
-        ? UI.seg({
-          id: 'doc-mode-seg',
-          active: null, // 初始态由 JS 按偏好存储设置,见下方 setMode
-          items: [
-            { key: 'edit', label: '编辑', icon: 'edit-line' },
-            { key: 'preview', label: '预览', icon: 'eye-line' },
-          ],
-        })
-        : '') +
-      // 保存是显式动作(不再自动保存):按钮只在脏时可用,Ctrl/Cmd+S 同效。
-      // 排在模式分段之后:先"在哪个模式",再"这个模式下的主操作"
-      (canEdit ? UI.btn({ id: 'btn-save', label: '保存', icon: 'save-line', kind: 'filled', size: 'sm', disabled: true }) : '') +
+      '<span class="save-status" id="save-status"><span class="status-dot" aria-hidden="true"></span><span id="save-status-text"></span></span>' +
+      (canEdit ? UI.seg({
+        id: 'doc-mode-seg', active: null,
+        items: [
+          { key: 'edit', label: '编辑', icon: 'edit-line' },
+          { key: 'preview', label: '预览', icon: 'eye-line' },
+        ],
+      }) : '') +
+      (canEdit ? UI.iconBtn({ id: 'btn-doc-split', icon: 'layout-right-line', title: '收起预览栏', attrs: 'hidden' }) : '') +
+      (canEdit ? UI.btn({ id: 'btn-save', label: '保存', icon: 'save-line', kind: 'tonal', size: 'sm', disabled: true }) : '') +
       '<span id="presence-inline" class="presence-inline"></span>' +
-      UI.btn({ id: 'btn-history', label: '历史', icon: 'history-line', kind: 'text', size: 'sm' }) +
-      // 「···」替身按钮:桌面隐藏(它收纳的三样都内联在工具组里);≤720 显示并把
-      // 保存状态/协同头像/历史收进菜单 —— 同壳侧栏"折叠态搜索按钮"的替身模式
+      UI.iconBtn({ id: 'btn-doc-outline', icon: 'list-unordered', title: '大纲' }) +
+      UI.iconBtn({ id: 'btn-doc-focus', icon: 'focus-3-line', title: '专注模式' }) +
       UI.iconBtn({ id: 'btn-head-more', icon: 'more-fill', title: '更多' }) +
-      '</div>' +
-      '</div>' +
+      '</div></div>' +
       UI.banner({
         kind: 'primary', icon: 'information-line', id: 'remote-bar', cls: 'remote-bar', hidden: true,
         html: '<span id="remote-msg"></span>',
-        // 不叫"加载最新":你在脏的时候点它会把没保存的正文直接盖掉。
-        // 改成打开逐块合并,由人决定哪几处用服务端的
         action: { id: 'btn-load-latest', label: '比较并合并', kind: 'tonal' },
       }) +
-      // 单一滚动容器:滚动条在页面右缘;正文居中
-      '<div class="editor-scroll" id="editor-scroll">' +
-      '<div class="editor-canvas">' +
+      '<div class="editor-scroll" id="editor-scroll"><div class="editor-canvas" id="editor-canvas">' +
       '<div class="doc-content">' +
-    // 标题 = 正文列的第一个块:与正文同宽同起点(桌面 880 阅读列/窄屏全宽),随文档滚动;
-      // 编辑/预览两种模式下都是同一个输入框(禁用态跟随 canEdit),不搞静态标题双渲染
       '<input id="doc-title" class="doc-title-input" placeholder="无标题文档" maxlength="200"' + (canEdit ? '' : ' disabled') + '>' +
-      // 正文未到时的骨架:一块空编辑区会被读成"这篇文档是空的",骨架则如实说"还没到"
+      '<div class="doc-meta" id="doc-meta"></div>' +
       '<div id="doc-loading">' + UI.skeleton('lines', 8) + '</div>' +
-      '<textarea id="md-source" class="md-source" placeholder="开始编写 Markdown 文档…输入 @ 或 [[ 引用文档与文件" spellcheck="false" hidden></textarea>' +
+      '<div class="doc-body" id="doc-body">' +
+      '<div id="md-source" class="md-source" hidden></div>' +
       '<div id="md-preview" class="markdown-body doc-preview" hidden></div>' +
-      // 反链栏在文档内容流末尾(跟随滚动),不占编辑器底部的固定空间
+      '</div>' +
       '<div class="doc-backlinks" id="doc-backlinks" hidden></div>' +
       '</div>' +
-      '</div></div>');
+      '<aside class="doc-outline" id="doc-outline" hidden><div class="doc-outline-title">大纲</div><div id="doc-outline-list"></div></aside>' +
+      '</div></div>' +
+      '<div class="doc-statusbar">' +
+      '<span id="doc-words">0 字</span><span id="doc-read">0 分钟</span>' +
+      '<span id="doc-cursor">行 1，列 1</span>' +
+      '<span id="doc-save-state"><span class="status-dot" aria-hidden="true"></span><span id="doc-save-state-text"></span></span>' +
+      '<span class="doc-space" id="doc-space"></span></div>' +
+      (canEdit ? '<div class="doc-toolbar" id="doc-toolbar" role="toolbar" aria-label="Markdown 编辑工具">' +
+        [['bold', 'bold', '加粗'], ['italic', 'italic', '斜体'], ['code', 'code-line', '行内代码'],
+          ['link', 'link', '链接'], ['quote', 'double-quotes-l', '引用'], ['unordered', 'list-unordered', '无序列表'],
+          ['todo', 'checkbox-line', '待办']].map((item) =>
+          '<button type="button" class="doc-tool-btn" data-command="' + item[0] + '" title="' + item[2] + '" aria-label="' + item[2] + '">' +
+          UI.icon(item[1]) + '</button>').join('') +
+        '</div>' : ''));
+
 
     const titleEl = frag.querySelector('#doc-title');
     const statusEl = frag.querySelector('#save-status');
+    const statusTextEl = frag.querySelector('#save-status-text');
     const saveBtn = frag.querySelector('#btn-save');
+    const splitBtn = frag.querySelector('#btn-doc-split');
     const moreBtn = frag.querySelector('#btn-head-more');
     const remoteBar = frag.querySelector('#remote-bar');
     const remoteMsg = frag.querySelector('#remote-msg');
-    const ta = frag.querySelector('#md-source');
+    const sourceHost = frag.querySelector('#md-source');
     const previewEl = frag.querySelector('#md-preview');
     const loadingEl = frag.querySelector('#doc-loading');
     const presenceEl = frag.querySelector('#presence-inline');
     const scrollEl = frag.querySelector('#editor-scroll');
+    const canvasEl = frag.querySelector('#editor-canvas');
+    const outlineEl = frag.querySelector('#doc-outline');
+    const outlineList = frag.querySelector('#doc-outline-list');
+    const wordsEl = frag.querySelector('#doc-words');
+    const readEl = frag.querySelector('#doc-read');
+    const metaEl = frag.querySelector('#doc-meta');
+    const cursorEl = frag.querySelector('#doc-cursor');
+    const footerStatusEl = frag.querySelector('#doc-save-state');
+    const footerStatusTextEl = frag.querySelector('#doc-save-state-text');
+    const spaceEl = frag.querySelector('#doc-space');
+    const toolbarEl = frag.querySelector('#doc-toolbar');
+    const wideQuery = window.matchMedia('(min-width: 1280px)');
 
     let ws = null;
     let wsReady = false;
     let destroyed = false;
-    let loading = true;           // 正文未到:显示骨架(空编辑区会被误读成空文档)
-    let lastSaved = '';           // 最近一次已保存的正文
-    let lastTitle = '';           // 最近一次已保存的标题
+    let loading = true;
+    let lastSaved = '';
+    let lastTitle = '';
     let editorFocused = false;
     let pendingRemote = null;
     let wsRetries = 0;
-    let editorCleanup = null;     // DocEditor.enhance 的清理函数(@/[[ 引用、浮动工具栏、上传)
-    let wsRetryTimer = null;      // WS 重连定时器
-    let leavePromptOpen = false;  // "未保存就离开"三选弹窗是否已开着(防重入)
-    let onBeforeUnload = null;    // 关标签/刷新的拦截器(本层被换掉时移除)
-    let presenceHtml = '';        // 最近一次 presence 的头像行(「···」菜单里复用)
-    // 基线版本:保存时把它一起送给服务端,声明"我这份是基于哪一版改的"。
-    // 只在**真正与服务端对齐**时推进(初始加载、saved 回包、采纳远端、REST 保存成功);
-    // 收到 remote 但没采纳时**不能**推进 —— 那等于谎报基线
+    let editor = null;
+    let wsRetryTimer = null;
+    let leavePromptOpen = false;
+    let onBeforeUnload = null;
+    let presenceHtml = '';
     let baseVersion = 0;
-    let conflict = null;          // {content, version, by} 服务端现场;非空 = 保存全部暂停
-    let conflictModal = null;     // 冲突弹窗开着时的引用
+    let conflict = null;
+    let conflictModal = null;
+    let focusMode = false;
+    let splitCollapsed = UI.pref.get('td:doc-split', '1') === '0';
+    let scrollSyncTarget = null;
+    let outlineScrollSource = '';
+    let outlineRaf = 0;
+    let spaceName = '';
+    let updatedAt = '';
+    let wordCount = 0;
 
-    // 清理在 render 里就注册(不能放到异步填充之后):本层被换掉时它立刻执行,
-    // WS、全局监听、离开守卫都必须在这里收干净 —— 作用域没有别的注销时机
     ctx.dispose(() => {
       destroyed = true;
       App.clearLeaveGuard();
+      document.body.classList.remove('doc-focus-mode');
       if (onBeforeUnload) { window.removeEventListener('beforeunload', onBeforeUnload); onBeforeUnload = null; }
       if (wsRetryTimer) { clearTimeout(wsRetryTimer); wsRetryTimer = null; }
-      if (editorCleanup) { editorCleanup(); editorCleanup = null; }
+      if (outlineRaf) { cancelAnimationFrame(outlineRaf); outlineRaf = 0; }
+      sourceHost.removeEventListener('scroll', onSourceScroll, true);
+      previewEl.removeEventListener('scroll', onPreviewScroll, true);
+      scrollEl.removeEventListener('scroll', scheduleOutlineActive);
+      if (editor) { editor.destroy(); editor = null; }
+      wideQuery.removeEventListener('change', onWideChange);
       try { if (ws) ws.close(); } catch (e) { /* 忽略 */ }
     });
-    // 编辑/预览模式:有编辑权默认编辑态并记住上次选择;VIEWER 恒为预览
     let mode = canEdit ? (UI.pref.get('td:doc-mode') || 'edit') : 'preview';
+    let saving = false;
+    let saveError = false;
+    let savedAt = '';
 
-    let saving = false;      // 写入在途
-    let saveError = false;   // 上一次写入失败(下次输入或重试时清掉)
-    let savedAt = '';        // 最近一次保存成功的 HH:MM
+    const value = () => editor ? editor.getValue() : '';
+    /** 保存状态 = 圆点 + 文字。state 决定圆点配色(ok/busy/warn/error),
+     *  文字本身仍是唯一的人读事实(窄屏、无障碍、测试都靠它)。 */
+    const setStatus = (text, state) => {
+      statusTextEl.textContent = text;
+      footerStatusTextEl.textContent = text;
+      statusEl.dataset.state = state || '';
+      footerStatusEl.dataset.state = state || '';
+    };
+    const dirty = () => value() !== lastSaved || (titleEl.value.trim() || '') !== lastTitle;
 
-    const setStatus = (t) => { statusEl.textContent = t; };
-    /** 脏 = 正文或标题与"已保存值"有任何不同。手动保存下它是按钮可用性的唯一依据,
-     *  也是离开拦截的判定 —— 所以它必须同时覆盖标题(否则改了标题点保存会被当成无事发生)。 */
-    const dirty = () => ta.value !== lastSaved || (titleEl.value.trim() || '') !== lastTitle;
-
-    /**
-     * 状态栏是这些状态的**唯一出口**:冲突 > 写入中 > 失败 > 未保存 > 已保存(时间) > 只读。
-     * 各处只改状态量再调它,不要各自拼文案 —— 拼法一定会漂。
-     * 顶栏不显示 v{N}:那是"保存次数",显示它会把"改得很勤"误读成"版本很多"。
-     */
     function renderStatus() {
-      if (conflict) setStatus('有冲突未解决');
-      else if (saving) setStatus('保存中…');
-      else if (saveError) setStatus('保存失败');
-      else if (dirty()) setStatus('未保存');
-      else if (!canEdit) setStatus('只读');
-      else if (savedAt) setStatus('已保存 ✓ ' + savedAt);
-      else setStatus('');
+      if (conflict) setStatus('有冲突未解决', 'error');
+      else if (saving) setStatus('保存中…', 'busy');
+      else if (saveError) setStatus('保存失败', 'error');
+      else if (dirty()) setStatus('未保存', 'warn');
+      else if (!canEdit) setStatus('只读', '');
+      else if (savedAt) setStatus('已保存', 'ok');
+      else setStatus('', '');
       statusEl.classList.toggle('conflict', !!conflict);
-      statusEl.title = conflict ? '点击重新打开冲突处理' : '';
-      // 窄屏下状态栏是隐藏的(收进「···」),冲突必须仍有一处可见信号
+      footerStatusEl.classList.toggle('conflict', !!conflict);
+      statusEl.title = conflict ? '点击重新打开冲突处理' : (savedAt ? '保存于 ' + savedAt : '');
       if (moreBtn) moreBtn.classList.toggle('conflict', !!conflict);
       if (saveBtn) {
-        // 冲突态下按钮改成"重开冲突处理"的入口:此刻发起写入只会被再拒一次
         saveBtn.disabled = conflict ? false : !dirty();
-        saveBtn.title = conflict ? '有冲突未解决,点击处理' : '保存(Ctrl+S)';
+        saveBtn.title = conflict ? '有冲突未解决，点击处理' : '保存(Ctrl+S)';
       }
     }
 
@@ -161,29 +179,132 @@ window.DocEditorView = (function () {
     };
 
     function renderPreview() {
-      // MdRender.mount 返回 Promise(内部 marked 是异步懒加载的)。
-      // 不接住它的话,解析异常会变成未处理的 rejection —— 预览区停在旧内容,
-      // 只在控制台报错,用户不知道发生了什么。
-      return Promise.resolve(MdRender.mount(previewEl, ta.value)).catch((e) => {
+      return Promise.resolve(MdRender.mount(previewEl, value())).then(() => {
+        scheduleOutlineActive();
+      }).catch((e) => {
         previewEl.innerHTML = UI.errorBanner({ message: '预览渲染失败:' + (e.message || '未知错误') });
       });
     }
 
-    // 编辑态 textarea 自动撑高(自身不滚动,滚动统一由 .editor-scroll 承担)。
-    // 注意:height='auto' 的瞬间 textarea 塌缩会把 scrollTop 钳到 0(焦点移走时表现为"跳回顶部"),
-    // 必须保存并恢复滚动位置
-    function autosize() {
-      const st = scrollEl.scrollTop;
-      ta.style.height = 'auto';
-      ta.style.height = ta.scrollHeight + 'px';
-      scrollEl.scrollTop = st;
+    /** 元信息行 = 空间 · 更新时间 · 字数(有哪项说哪项) */
+    function renderMeta() {
+      const bits = [];
+      if (spaceName) bits.push(spaceName);
+      if (updatedAt) bits.push('更新于 ' + UI.fmtDate(updatedAt));
+      bits.push(wordCount + ' 字');
+      metaEl.textContent = bits.join(' · ');
     }
 
-    /** 正文区三态:骨架 / 编辑 / 预览。正文没到之前不显示空的编辑区 */
+    function renderStats() {
+      const text = value();
+      const cjk = (text.match(/[\u3400-\u9fff\uf900-\ufaff]/g) || []).length;
+      const latin = (text.replace(/[\u3400-\u9fff\uf900-\ufaff]/g, ' ').match(/[\w'-]+/g) || []).length;
+      wordCount = cjk + latin;
+      const minutes = wordCount ? Math.max(1, Math.ceil(wordCount / 300)) : 0;
+      wordsEl.textContent = wordCount + ' 字';
+      readEl.textContent = minutes + ' 分钟';
+      renderMeta();
+    }
+
+    function renderOutline() {
+      if (!editor) return;
+      const headings = editor.getHeadings();
+      outlineList.innerHTML = headings.length ? headings.map((heading) =>
+        '<button type="button" class="outline-level-' + heading.level + '" data-id="' + heading.id + '">' +
+        UI.esc(heading.text) + '</button>'
+      ).join('') : '<span class="doc-outline-empty">暂无标题</span>';
+      paintOutlineActive();
+    }
+
+    // ---------- 大纲高亮:预览/源码按滚动位置,编辑态退回光标行 ----------
+    /** 按内容比例取最近标题(源码滚动、预览尚未画出标题时使用) */
+    function activeFromRatio(headings, ratio) {
+      const total = Math.max(1, value().length);
+      let active = headings[0].id;
+      headings.forEach((heading) => {
+        if (heading.pos / total <= ratio) active = heading.id;
+      });
+      return active;
+    }
+
+    /** 预览态:按标题在预览内容里的纵向位置判定"读到哪一节"。
+     *  用 offsetTop(内容内位置)而不是 getBoundingClientRect:后者要等滚动后的
+     *  视口布局,滚动与重绘不同步时会读到上一帧;阈值取滚动容器当前位置 + 24。 */
+    function activeFromPreviewDom(headings) {
+      const nodes = previewEl.querySelectorAll('h1,h2,h3,h4,h5,h6');
+      if (nodes.length !== headings.length) return headings[0].id;
+      const split = splitPreview();
+      const scroller = split ? previewEl : scrollEl;
+      const base = (split ? previewEl : scrollEl).offsetTop;
+      const top = scroller.scrollTop + 24;
+      let active = headings[0].id;
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].offsetTop - base <= top) active = headings[i].id;
+      }
+      return active;
+    }
+
+    function activeOutlineId() {
+      if (!editor) return null;
+      const headings = editor.getHeadings();
+      if (!headings.length) return null;
+      if (mode === 'preview') {
+        if (splitPreview() && outlineScrollSource === 'source') {
+          const src = sourceScrollEl();
+          const ratio = src.scrollHeight > src.clientHeight
+            ? src.scrollTop / (src.scrollHeight - src.clientHeight) : 0;
+          return activeFromRatio(headings, ratio);
+        }
+        return activeFromPreviewDom(headings);
+      }
+      const cursor = editor.getCursor();
+      let active = null;
+      headings.forEach((heading) => {
+        const line = editor.getValue().slice(0, heading.pos).split('\n').length;
+        if (line <= cursor.line) active = heading.id;
+      });
+      return active;
+    }
+
+    function paintOutlineActive() {
+      if (!outlineList || outlineEl.hidden) return;
+      const active = activeOutlineId();
+      outlineList.querySelectorAll('button').forEach((button) => {
+        button.classList.toggle('active', button.dataset.id === active);
+      });
+    }
+
+    /** rAF 节流:滚动事件一帧只算一次高亮。后台标签页/无渲染帧的环境里 rAF
+     *  可能长期不触发,再用一次 100ms 兜底,保证高亮不会停在旧位置。 */
+    function scheduleOutlineActive() {
+      if (outlineRaf) return;
+      outlineRaf = requestAnimationFrame(() => { outlineRaf = 0; paintOutlineActive(); });
+      setTimeout(() => {
+        if (!outlineRaf) return;
+        cancelAnimationFrame(outlineRaf);
+        outlineRaf = 0;
+        paintOutlineActive();
+      }, 100);
+    }
+
+    function widePreview() { return canEdit && mode === 'preview' && wideQuery.matches && !focusMode; }
+    function splitPreview() { return widePreview() && !splitCollapsed; }
+    // 设置页写入的偏好值是字符串 'true'/'false',缺省视为开启(W4-c 契约)
+    function previewLinkEnabled() { return UI.pref.get('td:preview-link', 'true') !== 'false'; }
+
     function showPanes() {
-      ta.hidden = loading || mode !== 'edit';
+      const wide = widePreview();
+      const split = wide && !splitCollapsed;
+      sourceHost.hidden = loading || (mode === 'preview' && !split);
       previewEl.hidden = loading || mode !== 'preview';
       loadingEl.hidden = !loading;
+      canvasEl.classList.toggle('preview-split', split);
+      if (editor) editor.setPreviewVisible(split);
+      if (splitBtn) {
+        splitBtn.hidden = !wide;
+        splitBtn.title = splitCollapsed ? '展开预览栏' : '收起预览栏';
+        splitBtn.innerHTML = UI.icon(splitCollapsed ? 'layout-right-2-line' : 'layout-right-line');
+      }
     }
 
     function setMode(m) {
@@ -191,28 +312,94 @@ window.DocEditorView = (function () {
       if (canEdit) UI.pref.set('td:doc-mode', m);
       if (segEl) UI.segSet(segEl, m);
       showPanes();
-      if (loading) return;   // 还没内容:不预览、不抢焦点
+      if (loading) return;
       if (m === 'preview') renderPreview();
-      else { autosize(); ta.focus(); }
+      else if (editor) { editor.focus(); scheduleOutlineActive(); }
     }
 
+    function onWideChange() { showPanes(); if (mode === 'preview') renderPreview(); }
+    wideQuery.addEventListener('change', onWideChange);
+
     const segEl = frag.querySelector('#doc-mode-seg');
-    // 段标识是 data-key(UI.seg 的统一约定),勿再写回 data-mode
     if (segEl) UI.segWire(segEl, (key) => { if (key !== mode) setMode(key); });
+
+    frag.querySelector('#btn-doc-outline').addEventListener('click', () => {
+      outlineEl.hidden = !outlineEl.hidden;
+      if (!outlineEl.hidden) renderOutline();
+    });
+    frag.querySelector('#btn-doc-focus').addEventListener('click', (event) => {
+      focusMode = !focusMode;
+      document.body.classList.toggle('doc-focus-mode', focusMode);
+      canvasEl.classList.toggle('focus-mode', focusMode);
+      event.currentTarget.title = focusMode ? '退出专注模式' : '专注模式';
+      if (focusMode && mode === 'preview') setMode('edit'); else showPanes();
+    });
+    if (splitBtn) splitBtn.addEventListener('click', () => {
+      splitCollapsed = !splitCollapsed;
+      UI.pref.set('td:doc-split', splitCollapsed ? '0' : '1');
+      showPanes();
+      if (!splitCollapsed && mode === 'preview') renderPreview();
+    });
+    outlineList.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-id]');
+      if (!button || !editor) return;
+      // 预览态:滚预览里的同名标题(源码可能根本不可见);编辑态仍走门面定位光标
+      if (mode === 'preview') {
+        const headings = editor.getHeadings();
+        const index = headings.findIndex((heading) => heading.id === button.dataset.id);
+        const node = previewEl.querySelectorAll('h1,h2,h3,h4,h5,h6')[index];
+        if (node) {
+          const scroller = splitPreview() ? previewEl : scrollEl;
+          scroller.scrollTop += node.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 24;
+          scheduleOutlineActive();
+          return;
+        }
+      }
+      editor.scrollToHeading(button.dataset.id);
+    });
+
+    /** 预览 ↔ 源码双向滚动联动(按比例)。设置项 td:preview-link 关闭时不同步。
+     *  源码真正的滚动容器是 CM 的 .cm-scroller(外层 .md-source 只给几何);
+     *  取元素而不是缓存:门面销毁重建后节点会换。 */
+    function sourceScrollEl() { return sourceHost.querySelector('.cm-scroller') || sourceHost; }
+
+    function syncScroll(from, to) {
+      if (!splitPreview() || !previewLinkEnabled() || scrollSyncTarget === from) return;
+      if (!from || from.scrollHeight <= from.clientHeight) return;
+      const ratio = from.scrollTop / (from.scrollHeight - from.clientHeight);
+      scrollSyncTarget = to;
+      to.scrollTop = ratio * Math.max(0, to.scrollHeight - to.clientHeight);
+      requestAnimationFrame(() => { if (scrollSyncTarget === to) scrollSyncTarget = null; });
+    }
+
+    function onSourceScroll() {
+      outlineScrollSource = 'source';
+      syncScroll(sourceScrollEl(), previewEl);
+      scheduleOutlineActive();
+    }
+
+    function onPreviewScroll() {
+      outlineScrollSource = 'preview';
+      syncScroll(previewEl, sourceScrollEl());
+      scheduleOutlineActive();
+    }
+
+    sourceHost.addEventListener('scroll', onSourceScroll, true);
+    previewEl.addEventListener('scroll', onPreviewScroll, true);
+    scrollEl.addEventListener('scroll', scheduleOutlineActive);
 
     function applyRemote(content, version) {
       const c = content || '';
-      // 远端覆盖是全文替换,尽量保留光标位置(程序赋值不触发 input,无需抑制回环)
-      const s = ta.selectionStart, epos = ta.selectionEnd;
-      ta.value = c;
+      if (editor) editor.setValue(c, { preserveSelection: true });
       loading = false;
       showPanes();
-      if (document.activeElement === ta) ta.setSelectionRange(Math.min(s, c.length), Math.min(epos, c.length));
-      if (mode === 'preview') renderPreview(); else autosize();
+      renderStats();
+      renderOutline();
+      if (mode === 'preview') renderPreview();
       lastSaved = c;
       if (version != null) baseVersion = version;
       saveError = false;
-      markSaved();   // 此时正文与服务端一致;标题若仍是脏的,renderStatus 会如实显示"未保存"
+      markSaved();
     }
 
     // ---------- 内容冲突:服务端拒绝时不静默覆盖,逐块交给用户合并 ----------
@@ -227,7 +414,7 @@ window.DocEditorView = (function () {
       conflict = { content: p.currentContent || '', version: p.currentVersion, by: p.by || '' };
       // 服务端那份才是"已保存"的事实:把 lastSaved 拉回它 —— 界面不再显示假成功,
       // dirty() 也恢复为真(本地确实有没写进去的内容)
-      lastSaved = serverContent;
+      lastSaved = conflict.content;
       pendingRemote = null;
       remoteBar.hidden = true;
       renderStatus();
@@ -257,7 +444,7 @@ window.DocEditorView = (function () {
 
     /** 画出弹窗内容(首次与"现场又变了"共用):说明一句 + 图例一行 + 逐块差异 */
     function paintConflict() {
-      const plan = Diff.build(ta.value, conflict.content);
+      const plan = Diff.build(value(), conflict.content);
       mergePlan = plan;
       // 现场变了之后块数可能变少,丢掉越界的选择;其余按序号保留
       Object.keys(picks).forEach((k) => { if (Number(k) >= plan.count) delete picks[k]; });
@@ -331,8 +518,10 @@ window.DocEditorView = (function () {
         UI.toast('已采用服务端版本', 'success');
         return;
       }
-      ta.value = merged;
-      autosize();
+      if (editor) editor.setValue(merged, { preserveSelection: true });
+      renderStats();
+      renderOutline();
+      if (mode === 'preview') renderPreview();
       baseVersion = version;   // 我们就是基于现场这一版合并的,写回去不会再撞
       // null 而不是 '':内容被清空时 '' 会让 saveContent 误判成"没有变化"而不发请求
       lastSaved = null;
@@ -355,7 +544,7 @@ window.DocEditorView = (function () {
       if (conflict) { openConflictModal(); return Promise.resolve(false); }
       const title = titleEl.value.trim();
       const needTitle = title !== lastTitle && !!title;
-      const content = ta.value;
+      const content = value();
       const needContent = content !== lastSaved;
       if (!needTitle && !needContent) { renderStatus(); return Promise.resolve(true); }
       saving = true;
@@ -418,15 +607,19 @@ window.DocEditorView = (function () {
     // 正文没存"的错位)。输入只更新脏态,不发起写入。
     titleEl.addEventListener('input', () => { saveError = false; renderStatus(); });
 
-    // 正文:输入只更新脏态与 presence,保存交给按钮 / Ctrl+S
-    ta.addEventListener('input', () => {
-      autosize();
+    function onEditorChange() {
       saveError = false;
+      renderStats();
+      renderOutline();
       renderStatus();
+      if (mode === 'preview') renderPreview();
       sendEditingTrue();
-    });
-    ta.addEventListener('focus', () => { editorFocused = true; sendEditing(true); });
-    ta.addEventListener('blur', () => { editorFocused = false; sendEditing(false); });
+    }
+    function onEditorCursor(cursor) {
+      cursorEl.textContent = '行 ' + cursor.line + '，列 ' + cursor.column;
+      // 预览态的高亮归滚动(见 scheduleOutlineActive);编辑态才跟光标
+      if (mode !== 'preview') paintOutlineActive();
+    }
 
     // presence:编辑中标记(§8)
     function sendEditing(editing) {
@@ -543,13 +736,9 @@ window.DocEditorView = (function () {
       applyRemote(r.content, r.version);
     };
 
-    frag.querySelector('#btn-history').onclick = () =>
-      openHistoryModal(docId, canEdit, () => reloadDoc(), () => dirty());
-
-    /** 「···」菜单(≤720 的收纳处;桌面按钮隐藏但机制同一份)。
+    /** 「···」菜单 = 文档级杂项的唯一收纳处(历史版本在此,状态摘要也在)。
      *  items 用函数形态:每次打开取实时的状态文案 —— 状态行是只读事实(走 custom),
-     *  冲突时附一条可点的处理入口(状态栏在窄屏不可见,这里是它的替身入口,
-     *  保存按钮在冲突态本身也可点开处理)。 */
+     *  冲突时附一条可点的处理入口。 */
     function buildMoreMenu() {
       const head = document.createElement('div');
       head.className = 'menu-header';
@@ -569,10 +758,6 @@ window.DocEditorView = (function () {
     }
     if (moreBtn) UI.dropdownMenu(moreBtn, buildMoreMenu, { align: 'end' });
 
-    // 树开关:点击行为归 project.js(状态机在那边),这里只转交
-    const treeToggleBtn = frag.querySelector('#btn-doc-tree');
-    if (treeToggleBtn && onTreeToggle) treeToggleBtn.addEventListener('click', onTreeToggle);
-
     // 状态栏在冲突态下是重开弹窗的入口(弹窗用 Esc/遮罩关掉后从这里回来)
     statusEl.addEventListener('click', () => { if (conflict) openConflictModal(); });
 
@@ -585,6 +770,11 @@ window.DocEditorView = (function () {
         applyRemote(doc.content, doc.version);
         titleEl.value = doc.title || '';
         lastTitle = doc.title || '';
+        spaceName = (doc.location && doc.location.projectName) || '';
+        updatedAt = doc.updatedAt || '';
+        spaceEl.textContent = spaceName;
+        renderMeta();
+        renderStatus();
         loadBacklinks();
         if (onTreeChanged) onTreeChanged();
       } catch (e) { UI.err(e); }
@@ -593,8 +783,23 @@ window.DocEditorView = (function () {
     // ---------- 手动保存与"离开前提示"的入口 ----------
     if (saveBtn) saveBtn.addEventListener('click', () => saveContent());
 
-    // Ctrl/Cmd+S:必须 preventDefault,否则会触发浏览器的"保存网页"
+    // 窄屏底部工具条(≤720 由 CSS 显示):命令统一走门面 runCommand,视图不碰编辑器状态。
+    // mousedown 阻止默认:按钮不抢走编辑器焦点,选区与光标保持原样(链接在对话框里收地址)
+    if (toolbarEl) {
+      toolbarEl.addEventListener('mousedown', (event) => {
+        if (event.target.closest('button')) event.preventDefault();
+      });
+      toolbarEl.addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-command]');
+        if (!button || !editor) return;
+        editor.runCommand(button.dataset.command);
+        if (button.dataset.command !== 'link') editor.focus();
+      });
+    }
+
+    // CM 内由门面键位处理；标题、预览等区域仍由文档视图接住保存快捷键。
     function onKeydown(e) {
+      if (sourceHost.contains(e.target)) return;
       if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) {
         e.preventDefault();
         saveContent();
@@ -620,7 +825,7 @@ window.DocEditorView = (function () {
         }).result;
         if (choice === 'discard') {
           // 先把脏态清掉再放行,否则下一次守卫还会再问一遍
-          lastSaved = ta.value;
+          lastSaved = value();
           lastTitle = titleEl.value.trim() || '';
           return true;
         }
@@ -684,8 +889,18 @@ window.DocEditorView = (function () {
     }
 
     async function init() {
-      // 编辑器增强:@ 与 [[ 引用浮层 / 选区浮动工具栏 / 粘贴拖拽上传(VIEWER 只读不启用)
-      if (canEdit && window.DocEditor) editorCleanup = DocEditor.enhance(ta, { projectId: projectId, upload: uploadFile });
+      if (!window.DocEditor) {
+        scrollEl.innerHTML = UI.banner({ kind: 'danger', icon: 'error-warning-line', text: '编辑器资源未加载' });
+        return;
+      }
+      editor = DocEditor.mount(sourceHost, {
+        value: '', projectId, readOnly: !canEdit, upload: uploadFile,
+        onChange: onEditorChange,
+        onSave: saveContent,
+        onFocus: () => { editorFocused = true; sendEditing(true); },
+        onBlur: () => { editorFocused = false; sendEditing(false); },
+        onCursor: onEditorCursor,
+      });
       setMode(mode);
       try {
         const doc = await api(Endpoints.doc(docId));
@@ -704,6 +919,11 @@ window.DocEditorView = (function () {
         applyRemote(doc.content, doc.version);
         titleEl.value = doc.title || '';
         lastTitle = doc.title || '';
+        spaceName = (doc.location && doc.location.projectName) || '';
+        updatedAt = doc.updatedAt || '';
+        spaceEl.textContent = spaceName;
+        renderMeta();
+        renderStatus();
         loadBacklinks();
       } catch (e) {
         renderStatus();

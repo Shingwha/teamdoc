@@ -1,14 +1,14 @@
-/* tokens.css — 设计令牌:Material You 语义角色
+/* tokens.css — 设计令牌:Material You 语义角色(三层表面 / 4·6·10·14 圆角 / 8 档字阶)
    - 中性色 / 表面 / 错误色:按浅色、深色各定义一套(所有种子色共享)
-   - 主色角色:6 个种子色 × 浅/深两套,静态写死(html[data-color] 切换),不做运行时算色
-   - 切换挂在 <html data-theme="light|dark" data-color="blue|..."> 上,由 js/theme.js 驱动 */
+   - 主色角色:6 个低饱和种子色 × 浅/深两套,静态写死(html[data-color] 切换)
+   - 切换挂在 <html data-theme="light|dark" data-color="blue|..." data-density="..."> 上 */
 
 :root {
-  /* 形状:4 档 + 胶囊。3px/6px 等散值一律归入最近的档 */
-  --radius-s: 8px;
-  --radius-m: 12px;
-  --radius-l: 16px;
-  --radius-xl: 28px;
+  /* 形状:4 档 + 胶囊。4 chip / 6 按钮输入 / 10 卡片菜单 / 14 对话框抽屉 */
+  --radius-s: 4px;
+  --radius-m: 6px;
+  --radius-l: 10px;
+  --radius-xl: 14px;
   --radius-full: 999px;
 
   /* 间距:4pt 网格 + 半档。
@@ -43,10 +43,11 @@
   --row-h-head: 44px;  /* 表格表头 */
   --row-h: 52px;       /* 数据表格行 */
 
-  /* 字阶(简化版) */
+  /* 字阶:8 档(display/headline/title/subtitle/body/label/caption + prose 正文面) */
   --fs-display: 28px;
   --fs-headline: 22px;
   --fs-title: 16px;
+  --fs-subtitle: 14px;
   --fs-body: 14px;
   --fs-sm: 13px;
   --fs-label: 12px;
@@ -92,16 +93,19 @@
   --font: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
 
-  /* 动效 */
-  --motion-fast: 150ms ease;
-  --motion: 200ms ease;
+  /* 动效:150/200/300 三档 + standard/decelerate 两条曲线,无弹跳 */
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0, 1);
+  --motion-fast: 150ms var(--ease-standard);
+  --motion: 200ms var(--ease-standard);
+  --motion-slow: 300ms var(--ease-decelerate);
 
   /* 布局尺寸 */
+  --topbar-h: 40px;
   --sidebar-w: 240px;
-  --sidebar-w-min: 72px;
-  --w-tree: 260px;      /* 文档树面板(宽屏内联列与窄屏抽屉同一宽,不随形态换档 ——
-                           面板的抽屉宽恒等于内联宽,除非有注释说明的理由)/
-                           历史版本列表列(同一宽度档) */
+  --sidebar-w-min: 64px;  /* 折叠态 = 纯图标列 */
+  --drawer-w: 480px;      /* 设置/版本历史抽屉 */
+  --w-tree: 260px;      /* 文档树(左栏)宽度档 / 历史版本列表列 */
   --tree-indent: 18px;  /* 文档树每层缩进 */
 
   /* 页宽:唯一决定内容横向范围的地方,只挂在页面容器(#view)上。
@@ -181,13 +185,14 @@
    就只能自己造个值,那正是这次重构要消除的问题。 */
 html[data-theme="light"] {
   color-scheme: light;
-  --md-surface: #fdfcff;
+  /* 三层表面:画布 / 容器(侧栏、卡槽) / 悬浮(弹层、抽屉) */
+  --md-surface: #fcfcfd;
   --md-surface-dim: #dedfe3;
   --md-surface-container-lowest: #ffffff;
-  --md-surface-container-low: #f6f7f9;
-  --md-surface-container: #f0f1f4;
-  --md-surface-container-high: #e9eaee;
-  --md-surface-container-highest: #e2e3e7;
+  --md-surface-container-low: #f6f7f8;
+  --md-surface-container: #f1f2f4;
+  --md-surface-container-high: #ffffff;
+  --md-surface-container-highest: #e9eaee;
   --md-on-surface: #1f2329;
   --md-on-surface-variant: #646a73;
   --md-outline: #8f959e;
@@ -216,11 +221,11 @@ html[data-theme="dark"] {
   color-scheme: dark;
   --md-surface: #141517;
   --md-surface-dim: #0e0f11;
-  --md-surface-container-lowest: #0c0d0f;
+  --md-surface-container-lowest: #121315;
   --md-surface-container-low: #1a1b1e;
-  --md-surface-container: #1f2124;
-  --md-surface-container-high: #292b2f;
-  --md-surface-container-highest: #33363b;
+  --md-surface-container: #202225;
+  --md-surface-container-high: #2a2c30;
+  --md-surface-container-highest: #34373c;
   --md-on-surface: #e3e4e7;
   --md-on-surface-variant: #b9bcc2;
   --md-outline: #83868c;
@@ -246,13 +251,13 @@ html[data-theme="dark"] {
 
 /* ================= 种子色:蓝(默认 #3370ff) ================= */
 html[data-theme="light"][data-color="blue"] {
-  --md-primary: #3370ff;
+  --md-primary: #4468c9;
   --md-on-primary: #ffffff;
   --md-primary-container: #dbe4ff;
   --md-on-primary-container: #10297e;
 }
 html[data-theme="dark"][data-color="blue"] {
-  --md-primary: #adc6ff;
+  --md-primary: #a9bdf0;
   --md-on-primary: #12318c;
   --md-primary-container: #2547a6;
   --md-on-primary-container: #dbe4ff;
@@ -260,13 +265,13 @@ html[data-theme="dark"][data-color="blue"] {
 
 /* ================= 种子色:紫 ================= */
 html[data-theme="light"][data-color="purple"] {
-  --md-primary: #7558f0;
+  --md-primary: #6f5bc9;
   --md-on-primary: #ffffff;
   --md-primary-container: #e9ddff;
   --md-on-primary-container: #2e1a6b;
 }
 html[data-theme="dark"][data-color="purple"] {
-  --md-primary: #cfbcff;
+  --md-primary: #c8baf0;
   --md-on-primary: #3f2595;
   --md-primary-container: #5743b8;
   --md-on-primary-container: #e9ddff;
@@ -274,13 +279,13 @@ html[data-theme="dark"][data-color="purple"] {
 
 /* ================= 种子色:绿 ================= */
 html[data-theme="light"][data-color="green"] {
-  --md-primary: #1d8a4e;
+  --md-primary: #2f7d53;
   --md-on-primary: #ffffff;
   --md-primary-container: #b9eccb;
   --md-on-primary-container: #00391b;
 }
 html[data-theme="dark"][data-color="green"] {
-  --md-primary: #90d6a9;
+  --md-primary: #94c9a7;
   --md-on-primary: #003920;
   --md-primary-container: #00522c;
   --md-on-primary-container: #abf0c4;
@@ -288,13 +293,13 @@ html[data-theme="dark"][data-color="green"] {
 
 /* ================= 种子色:橙 ================= */
 html[data-theme="light"][data-color="orange"] {
-  --md-primary: #b85a19;
+  --md-primary: #a8622f;
   --md-on-primary: #ffffff;
   --md-primary-container: #ffdcc0;
   --md-on-primary-container: #421b00;
 }
 html[data-theme="dark"][data-color="orange"] {
-  --md-primary: #ffb877;
+  --md-primary: #e8b184;
   --md-on-primary: #4d2100;
   --md-primary-container: #6e3c07;
   --md-on-primary-container: #ffdcc0;
@@ -302,13 +307,13 @@ html[data-theme="dark"][data-color="orange"] {
 
 /* ================= 种子色:粉 ================= */
 html[data-theme="light"][data-color="pink"] {
-  --md-primary: #bf2f63;
+  --md-primary: #b04466;
   --md-on-primary: #ffffff;
   --md-primary-container: #ffd9e2;
   --md-on-primary-container: #47001f;
 }
 html[data-theme="dark"][data-color="pink"] {
-  --md-primary: #ffb0c5;
+  --md-primary: #e8afc0;
   --md-on-primary: #631138;
   --md-primary-container: #82274e;
   --md-on-primary-container: #ffd9e2;
@@ -316,14 +321,33 @@ html[data-theme="dark"][data-color="pink"] {
 
 /* ================= 种子色:青 ================= */
 html[data-theme="light"][data-color="teal"] {
-  --md-primary: #007888;
+  --md-primary: #266d78;
   --md-on-primary: #ffffff;
   --md-primary-container: #b4ecf5;
   --md-on-primary-container: #001f26;
 }
 html[data-theme="dark"][data-color="teal"] {
-  --md-primary: #87d3e2;
+  --md-primary: #8fc4cd;
   --md-on-primary: #00363d;
   --md-primary-container: #004f58;
   --md-on-primary-container: #b4ecf5;
+}
+
+/* ================= 密度(个人设置:舒适 / 紧凑) =================
+   只收控件与列表行的档位,不改字号与页边距 —— 密度是"一屏能看多少行",不是缩小文字 */
+html[data-density="comfortable"] {
+  --row-h: 48px;
+  --row-h-head: 40px;
+}
+html[data-density="compact"] {
+  --row-h: 42px;
+  --row-h-head: 36px;
+  --ctl-l: 32px;
+  --ctl-xl: 36px;
+  --ctl-2xl: 40px;
+  --sp-3: 10px;
+  --sp-3-5: 12px;
+  --sp-4: 14px;
+  --sp-5: 18px;
+  --sp-6: 20px;
 }

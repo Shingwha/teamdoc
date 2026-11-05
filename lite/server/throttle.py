@@ -1,10 +1,10 @@
-"""凭据尝试节流(机制层;策略与阈值由调用方声明,见 auth.py 的 LOGIN_*_POLICY)。
+"""凭据尝试节流(机制层;策略与阈值由调用方声明,见 security/sessions.py 的 LOGIN_*_POLICY)。
 
 解决的问题:登录这类"口令可被反复猜"的端点,必须在**执行校验之前**挡住同一账号、
 同一来源的连续失败 —— 否则撞库只有算力成本,没有次数成本。
 
 只做机制,不掺业务语义:键、窗口内计数、冷却与退避、过期清扫、管理端查询。
-"哪个维度、上限多少、成功要不要清零"全部落在 Policy 上,由 auth.py 定义。
+"哪个维度、上限多少、成功要不要清零"全部落在 Policy 上,由 security/sessions.py 定义。
 
 ## 为什么状态落库(models.ThrottleState)而不是进程内计数
 
@@ -32,7 +32,8 @@ from sqlalchemy import case, or_, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session as DbSession
 
-from models import ThrottleState, utcnow
+from db import utcnow
+from models import ThrottleState
 
 # 清扫节流阀:失败登录是低频事件,不必每次记账都全表扫一遍
 SWEEP_INTERVAL_SECONDS = 600
@@ -220,7 +221,7 @@ _swept_at = 0.0
 
 def sweep(db: DbSession, max_window: int) -> int:
     """清掉"既不在冷却中、窗口也已过期"的行 —— 纯垃圾(攻击者拿随机邮箱失败会造行)。
-    带进程内节流阀(单 worker 部署下进程内状态就是精确的,见 models.INFLIGHT_STORAGE)。"""
+    带进程内节流阀(单 worker 部署下进程内状态就是精确的,见 storage.INFLIGHT_STORAGE)。"""
     global _swept_at
     now_mono = time.monotonic()
     if now_mono - _swept_at < SWEEP_INTERVAL_SECONDS:

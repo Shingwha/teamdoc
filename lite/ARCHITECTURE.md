@@ -22,23 +22,18 @@ cd lite/server && uv sync && uv run uvicorn main:app --host 0.0.0.0 --port 8000 
 |---|---|
 | `config.py` | **全部环境变量的读取与校验**;有效限额字典(管理后台展示它) |
 | `errors.py` | **全部 HTTP 错误码常量 + `err()` / `bad_request()`** |
-| `serialize.py` | **全部响应形状**:`user_json/project_json/doc_json/file_json/folder_json` 的 face,以及 `iso()` 与 `avatar_color()` |
+| `serialize.py` | **全部响应形状**:`user_json/project_json/doc_json/file_json/...` 的 face |
 | `ids.py` | ULID 生成与形状判定;`IdPath`(路径参数类型) |
-| `models.py` | 表结构(唯一来源)、连接与 PRAGMA、请求级会话、跨资源小工具(`is_live`/`storage_basename`/`file_abspath`/`disk_free_bytes`/`build_tree`/`collect_subtree`/`location_json`…) |
-| `schema.py` | 建表 + 结构自检(不一致就拒绝启动) |
-| `auth.py` | 会话与 PAT、密码、登录节流与审计、**权限金字塔**、取参与校验工具、用户管理与同事目录 |
-| `projects.py` | 项目 CRUD、成员、发现广场、统计聚合(`batch_stats`)、可见项目集合 |
-| `docs.py` | 文档树、正文读写与版本、反链、移动 |
-| `files.py` | 云空间:上传下载、文件夹、打包、分享链接、项目占用 |
-| `trash.py` | 回收站:文档/文件夹/文件的删、恢复、彻底删除 + 列表(一个树引擎 + 薄端点) |
-| `search.py` | 搜索;`q` 为空即"最近动态" |
-| `admin.py` | 管理后台 HTTP 入口:存储统计、孤儿清理、会话与登录审计、备份/恢复 |
-| `backup.py` | 备份与恢复引擎(项目里唯一的后台线程:定时备份) |
-| `refs.py` | **引用契约的服务端半边**:正文里两种引用形态的解析与生成 |
-| `ws.py` | 文档协同 WebSocket(每条消息重新复核权限) |
+| `db.py` | 引擎、请求级会话、`release_db`、`utcnow`、`is_live` |
+| `storage.py` | 数据目录 / DB 路径 / 物理名 / 磁盘余量与 INFLIGHT 登记 |
+| `treeutil.py` | 文档树构建、子树收集、排序位、位置信息 |
+| `http_util.py` | 通用字段解析与 `client_ip/client_ua` |
+| `security/` | 密码、会话、PAT、权限上下文(不反向依赖 router/service) |
+| `services/` | 业务:spaces/docs/files/versions/trash/search/backup/audit/users |
+| `routers/` | 薄 HTTP/WS 入口,只做解析、调用服务与序列化 |
+| `schema.py` | 建表 + 迁移补列 + 结构自检(不一致就拒绝启动) |
 | `media.py` | mime 判定与 inline 白名单(**安全边界,勿放宽**) |
-| `throttle.py` | 凭据尝试的节流机制(策略在 `auth.py` 定义) |
-| `logsetup.py` / `watchdog.py` | 非阻塞日志;事件循环卡顿时的线程栈转储 |
+| `throttle.py` / `logsetup.py` / `watchdog.py` | 节流机制、非阻塞日志、事件循环卡顿转储 |
 
 ### 前端 `lite/web/`(静态页,无构建步骤)
 
@@ -48,14 +43,36 @@ cd lite/server && uv sync && uv run uvicorn main:app --host 0.0.0.0 --port 8000 
 |---|---|
 | `js/endpoints.js` | **全部后端路径的构造处**(只有这里出现 `/api/...` 字面量) |
 | `js/api.js` | fetch 封装、错误信封解析、401 的全局处理 |
-| `js/route.js` | 路由文法:hash ↔ 路由事实(`Route.resolve` 纯解析、`Route.NAV` 模块导航表、`Route.project` 串构造点)。**视图分派只在这里** |
+| `js/route.js` | 路由文法:hash ↔ 路由事实(`Route.resolve` 纯解析、`Route.NAV` 模块导航表、`Route.project/settings/admin` 串构造点)。**视图分派只在这里** |
 | `js/scopes.js` | 渲染机制:作用域链的复用/重建/卸载与片段挂载(见「渲染契约」) |
-| `js/app.js` | 壳(侧栏 + 用户菜单)+ 路由入口 + 登录视图 |
-| `js/ui.js` | 组件与工具库;角色判定镜像 `UI.can*`;`UI.fileIcon`/`canInlineMime`;`UI.skeleton` |
+| `js/app.js` | 壳(40px 顶栏 + 左栏 + 单一内容面)+ 空间切换器/通知/用户菜单 + 路由入口 + 登录与两步初始化;`App.loadAdmin()` 是 admin 脚本的唯一加载处 |
+| `js/ui.js` | 组件与工具库;角色判定镜像 `UI.can*`;`UI.empty/UI.error`;`UI.drawer`(480 右侧抽屉);`UI.dualPanel`(壳侧栏唯一面板原语) |
 | `js/ref.js` | 引用契约的前端半边(与 `refs.py` 逐字对齐) |
 | `js/markdown.js` | Markdown 渲染栈(本地 vendor:marked / Prism / KaTeX / Mermaid) |
 | `js/preview.js` | 站内预览浮层;`Preview.kindOf` 是"怎么预览"的唯一判定 |
-| `js/views/*.js` | 视图(= 作用域工厂:`XxxLevel(...)` 返回一层作用域描述) |
+| `js/views/home.js` | 空间首页(`#/` 与 `#/p/{pid}/home`)/ 最近 / 收藏与本机收藏存储 |
+| `js/views/palette.js` | Ctrl+K 命令面板(动作 + 文档/文件 + 管理员捷径) |
+| `js/views/*.js` | 其他视图(= 作用域工厂:`XxxLevel(...)` 返回一层作用域描述) |
+
+### 编辑器 `js/editor/`(CM6 的唯一入口)
+
+`index.html` 按固定顺序加载:vendor bundle → `markdown` → `keymap` → `theme` → `extensions` → `panels` → `index`。顺序即依赖图,不可换。
+
+| 文件 | 职责 |
+|---|---|
+| `js/editor/markdown.js` | **纯文本变换**(无 DOM/无 CM):行内格式、块格式、链接、代码块、表格、标题解析、字数统计。Node 可直接 require(测试用它) |
+| `js/editor/keymap.js` | 编辑器键位:保存/格式化快捷键 + `markdownKeymap`(列表/引用/待办回车续行、Backspace 删标记)。自定义绑定在前,表格回车优先认领 Enter |
+| `js/editor/theme.js` | CM6 主题与高亮样式(颜色全部取自 `tokens.css` 的 `--md-*` 令牌,亮/暗自动跟随) |
+| `js/editor/extensions.js` | 基础扩展(历史、选区、括号、搜索、只读/可编辑)、三连反引号补闭合围栏(inputHandler,绕开 IME 组字)、编辑器内 Mod-k 截获(链接插入由门面执行,不冒泡到全局命令面板) |
+| `js/editor/panels.js` | 编辑器内浮层与交互:`@`/`[[` 引用候选、`/` 插入菜单、附件上传与拖放、选区浮动工具条 |
+| `js/editor/index.js` | **`DocEditor` 门面**:`mount(host, options)` 返回 `getValue/setValue/insertText/insertRef/focus/getCursor/getHeadings/scrollToHeading/setPreviewVisible/runCommand/destroy` |
+
+硬约束:
+
+- **CodeMirror 只出现在 `js/editor/` 与 `web/vendor/codemirror/`**。视图、壳、其他模块不得出现 `CM6` 字样或直接 import/引用 CM 包。
+- **视图只用 `DocEditor` 门面**。文档视图(`views/doc-editor.js`)不碰编辑器状态;窄屏工具条也经 `runCommand(name)`,不自己拼结论文本。程序化 `setValue` 不触发 `onChange`;用户编辑一次事务一次回调。
+- **vendor 是构建产物,不是运行时依赖**:`cd lite/tools/editor && npm ci --ignore-scripts && npm run build` 生成 `web/vendor/codemirror/editor.bundle.js`(esbuild IIFE,`--global-name=CM6`),产物提交入库;运行时只加载本地 IIFE,无 CDN、无外链、无浏览器内构建。
+- `tools/editor/package.json` 的依赖全部锁死精确版本(无 `^`/`~`),`package-lock.json` 一并提交;升级 CM 必须同时重建 bundle 并跑 `tests/test_editor_cm6.py`。
 
 ### 启动顺序(`main.py`,改动前先读那一段)
 
@@ -74,20 +91,24 @@ cd lite/server && uv sync && uv run uvicorn main:app --host 0.0.0.0 --port 8000 
 | 响应形状 | `serialize.py` 的 face | 所有端点 |
 | 时间戳格式 | `serialize.iso()` | 所有响应的日期字段 |
 | ULID 生成与形状 | `ids.py` | 表主键默认值、`IdPath`、取参校验 |
-| 权限判定 | `auth.project_role`(+ `has_role`/`ensure_project_role`/`require_role`) | 全部端点、WS、前端 `UI.can*` 镜像 |
-| "已删即不存在" | `models.is_live` | REST(404)与 WS(4404) |
-| 引用语法 | `refs.py` / `ref.js` | 反链、被引用标记、移动前提示、编辑器插入 |
-| 文件物理名 | `models.storage_basename` | 下载、孤儿扫描、备份打包 |
-| 磁盘余量 | `models.disk_free_bytes` | 上传前预检、写盘复查、存储总览、恢复前检查 |
+| 权限判定 | `security/context.py` 的 `project_role`(+ `has_role`/`ensure_project_role`/`require_project_role`) | 全部端点、WS、前端 `UI.can*` 镜像 |
+| "已删即不存在" | `db.is_live` | REST(404)与 WS(4404) |
+| 引用语法 | `services/refs.py` / `ref.js` | 反链、被引用标记、移动前提示、编辑器插入 |
+| 文件物理名 | `storage.storage_basename` | 下载、孤儿扫描、备份打包 |
+| 磁盘余量 | `storage.disk_free_bytes` | 上传前预检、写盘复查、存储总览、恢复前检查 |
 | 预览方式 | `Preview.kindOf` | 云空间预览按钮、文档 @引用浮层 |
-| 项目统计 | `projects.batch_stats` | 项目列表、广场、管理后台 |
+| 空间统计 | `services/spaces.batch_stats` | 空间列表、广场、管理后台 |
 | 后端路径 | `endpoints.js` | 全部视图 |
-| 视图分派 | `route.js` 的 `Route.resolve` + `Route.NAV` | `app.js` 的路由入口、侧栏子项、后台项目区的模块直达按钮 |
+| 视图分派 | `route.js` 的 `Route.resolve` + `Route.NAV` | `app.js` 的路由入口、左栏导航、后台项目区的模块直达按钮 |
+| 命名空间路由 | `Route.project/settings/admin` | 视图、左栏、空间切换器、命令面板;视图不手拼路由串 |
+| Admin 脚本 | `App.loadAdmin()` 的按序列表 | 仅管理员路由调用;普通用户不请求 admin JS |
+| 文档树 | `views/docs.js` 写入 `#side-doc-tree` | 左栏唯一树;主区不再有第二棵树 |
+| 编辑器 | `js/editor/index.js` 的 `DocEditor` 门面 | 文档视图;取值、设值、插入、命令、预览可见性都不绕过门面 |
 | 作用域身份/复用边界 | 各视图 `XxxLevel(...)` 的 `key` | `scopes.js`(比对键决定复用还是重建) |
 | 页面模式(窄页/满高) | `route.js` 的 `MODE_CLASS` | `scopes.js` 在换层时设到宿主上;视图不得自己加类 |
-| 面板初始开/关 | `ui.js` 的 `panelOpenByDefault` | `UI.dualPanel` 与文档模块骨架 |
-| 回收站响应 | `trash._result()` | 九个变更端点 |
-| 登录节流策略 | `auth.LOGIN_*_POLICY` | 登录、自助改密、管理后台解锁 |
+| 面板初始开/关 | `ui.js` 的 `panelOpenByDefault` | `UI.dualPanel`(壳侧栏唯一消费方) |
+| 回收站响应 | `services/trash._result()` | 九个变更端点 |
+| 登录节流策略 | `security/sessions.LOGIN_*_POLICY` | 登录、自助改密、管理后台解锁 |
 
 ## 4. 契约
 
@@ -175,15 +196,18 @@ JSON true/false。静默回退会让"传错了却看不出"的调用方一直传
 **面板状态只有 `UI.dualPanel` 一个原语**:一个用户意图 = 一个布尔 = 一个类;
 「开」的宽屏形态是内联、「开」的窄屏形态是抽屉,各一条 CSS 规则,断点两侧零同步代码;
 拖窗口**只换形态不换开/关**。新面板 = 一次 `dualPanel` 调用 + 两条渲染规则 + 下表加一行,
-不得自造第二套状态变量。
+不得自造第二套状态变量。当前只有壳侧栏一个消费方:文档树已在左栏内,不是独立面板。
 
 **区域几何盘点(唯一来源):**
 
 | 区域 | 宽 | 形态(宽/窄) | 边距 | 来源 |
 |---|---|---|---|---|
-| 壳侧栏 | 240 / rail 72 | 内联 / rail;窄屏 rail 或抽屉 | sp-3 | app.css + `--sidebar-w*` |
-| 文档树 | `--w-tree` 260(抽屉宽恒等于内联宽) | 内联列 / 抽屉 | inner sp-2 + 行 sp-3 | app.css + `--w-tree` |
+| 顶栏 | 40,全宽 | 单行 | sp-3 | app.css + `--topbar-h` |
+| 壳侧栏 | 240 / 折叠 64 | 内联 / 图标列;窄屏抽屉 | sp-2 | app.css + `--sidebar-w*` |
+| 左栏文档树 | 随侧栏 | 侧栏内嵌;折叠态隐藏 | 行 sp-3,缩进 `--tree-indent` | app.css + `views/docs.js` |
 | 页面 #view | ≤ `--w-page` 1120 / narrow 800 | 单页 | `--g-page` 连续 | app.css + tokens |
+| 设置页 | 180 + 内容 | 两栏;窄屏单栏 | sp-6 | app.css |
+| 抽屉 | `--drawer-w` 480 | 右侧;窄屏全屏 | sp-4 | app.css + `UI.drawer` |
 | 编辑器列 | 弹性 | — | `--editor-x` 连续(4cqw) | editor.css |
 | 阅读列 | ≤ `--w-read` 880,居中 | — | 列-gap sp-8 | editor.css |
 
@@ -198,7 +222,9 @@ JSON true/false。静默回退会让"传错了却看不出"的调用方一直传
 **一个界面 = 一串作用域,键不变即复用:**
 
 ```
-#/p/x/docs/D  →  [ p/x(项目:项目对象) → p/x/docs(文档模块:树列) → p/x/docs/D(文档位:编辑器) ]
+#/p/x/docs/D  →  [ p/x(空间:空间对象) → p/x/docs(文档模块:左栏树) → p/x/docs/D(文档位:编辑器) ]
+#/              →  [ home #/ (解析记忆空间;无空间时显示管理入口) ]
+#/settings/T    →  [ settings/T ]
 ```
 
 每个作用域是 `{key, render(ctx, props), child(), onChild(props)}`;walker(`scopes.js`)比
@@ -228,15 +254,16 @@ JSON true/false。静默回退会让"传错了却看不出"的调用方一直传
 
 **数据的生命期 = 显示它的区域的生存期**(不引入客户端缓存):离开就丢、回来重新取。多用户
 下"别人改了什么"不可枚举,缓存必然引出失效策略这个新的失败面 —— 这一层的价值是渲染粒度,
-不是请求次数。代价:项目对象是**进入项目时的快照**,项目内的计数(成员数/文档数)在停留期间
-可能偏旧;改项目自身的入口(设置页)改完当场 `App.refresh()`。
+不是请求次数。代价:空间对象是**进入空间时的快照**,空间内的计数(成员数/文档数)在停留期间
+可能偏旧;改空间自身的入口(设置抽屉)改完当场 `App.refresh()` 或重取当前层。
 
-`App.refresh()` = 丢掉现有链整条按当前路由重建(页面身份变了才用它,例如刚加入一个项目 ——
+`App.refresh()` = 丢掉现有链整条按当前路由重建(页面身份变了才用它,例如刚加入一个空间 ——
 错误态的键没变,只让那一层自己重取不够,因为"能不能看"是上游层的数据)。只是本层数据变了的
 场合,让那一层自己重取更轻。
 
 违例检测仪:`tests/test_render_contract.py`(静态:#view 只许路由层碰、分派只在路由表、视图
-不得加页面模式类;浏览器:切文档后侧栏与文档树的**节点身份**不变、不重新取项目对象与文档树)。
+不得加页面模式类;浏览器:切文档后左栏导航与文档树的**节点身份**不变、不重新取空间对象与文档树;
+离开文档模块再回来,文档树重建)。
 
 ## 5. 代码约定
 
@@ -261,8 +288,10 @@ JSON true/false。静默回退会让"传错了却看不出"的调用方一直传
 - `referenced`(被引用徽标)每次列目录都扫本项目文档正文;文档上千后应改成引用索引表。
 - 文档版本按年龄分层保留(稳态约 124 条/文档),不需要手工清理。
 - 不做两步验证(内网自部署 + 30 人规模,价值低于"禁用账号 + 可吊销 PAT")。
-- 前端不留活作用域:切走再回来会重建(数据重新取)。文档树的折叠态按项目记着(与侧栏
-  展开态同口径),但树列的滚动位置不保留;跨模块 keep-alive 是另一套机制,不做。
+- 前端不留活作用域:切走再回来会重建(数据重新取)。文档树的折叠态按空间记着(与左栏
+  展开态同口径),但树的滚动位置不保留;跨模块 keep-alive 是另一套机制,不做。
+- 收藏与"我浏览的"存 localStorage(方案未给数据模型),换设备/换浏览器不同步。
+- 管理后台脚本由 `App.loadAdmin()` 按需注入;普通用户不会请求 admin JS,但没有独立构建产物。
 - 首屏(登录页/未登录探测)不在作用域机制里:它是另一条根(`#login-root`)且与登录态同生共死。
 
 ## 7. 测试

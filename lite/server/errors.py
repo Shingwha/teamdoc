@@ -29,10 +29,15 @@ JOIN_REQUIRED = "JOIN_REQUIRED"
 # 403:凭据是只读令牌却发起了写请求。与 FORBIDDEN 分开的理由同上:客户端要据此
 # 提示"换一个 read,write 令牌",而不是"你没有权限"
 READ_ONLY_TOKEN = "READ_ONLY_TOKEN"
+# 403:空间已归档。读与直达仍可用，但任何内容/成员写入都要先解除归档。
+# 单独成码，前端才能把"归档了"与"没权限"区分开。
+SPACE_ARCHIVED = "SPACE_ARCHIVED"
 # 404:资源不存在,或存在但对调用方不可见(两种情况不区分,避免探测)
 NOT_FOUND = "NOT_FOUND"
 # 409:资源都在,是这次操作本身不成立(重名、成环、最后一个所有者……)
 CONFLICT = "CONFLICT"
+# 409:普通上传撞同目录同名文件；客户端据此提供保留两个/创建新版本选择
+NAME_EXISTS = "name_exists"
 # 429:凭据尝试节流
 TOO_MANY_ATTEMPTS = "TOO_MANY_ATTEMPTS"
 

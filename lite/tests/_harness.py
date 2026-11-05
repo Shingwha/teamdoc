@@ -122,15 +122,16 @@ class Client:
         assert r.status == 200, f"登录失败 {email}: {r.status} {r.data}"
         return r
 
-    def upload(self, pid, filename, content, folder_id=None, ctype="application/octet-stream"):
-        """raw body 上传:请求体即文件,元数据走 query string(见 files.py upload_file)。
-
-        ctype 参数保留:"攻击者伪声明 mime"这个攻击面虽然已被服务端按扩展名判定堵死,
-        把伪声明意图留在测试里可读仍有价值 —— 现在的真实攻击面只剩文件名。
-        """
+    def upload(self, pid, filename, content, folder_id=None, ctype="application/octet-stream",
+               name_mode=None, version_of=None):
+        """raw body 上传，元数据走 query string；可选撞名处理分支。"""
         qs = f"?projectId={urllib.parse.quote(str(pid))}&name={urllib.parse.quote(filename)}"
         if folder_id:
             qs += "&folderId=" + urllib.parse.quote(str(folder_id))
+        if name_mode:
+            qs += "&name_mode=" + urllib.parse.quote(name_mode)
+        if version_of:
+            qs += "&version_of=" + urllib.parse.quote(version_of)
         return self.post("/api/files/upload" + qs, raw_body=content, ctype=ctype)
 
 
@@ -147,7 +148,8 @@ def make_user(admin, name, password="pw12345678"):
     return email, r.data
 
 
-def abort_raw_upload(base_url, sid, pid, filename, total_bytes, send_bytes):
+def abort_raw_upload(base_url, sid, pid, filename, total_bytes, send_bytes,
+                     version_file_id=None):
     """裸 socket 发一个 raw body 上传,发到一半直接断开连接。
 
     模拟"传大文件时网络断/用户关页面":服务端已写了部分字节到 data/files,
@@ -157,7 +159,8 @@ def abort_raw_upload(base_url, sid, pid, filename, total_bytes, send_bytes):
     parsed = urllib.parse.urlsplit(base_url)
     host = parsed.hostname or "127.0.0.1"
     port = parsed.port or 80
-    path = (f"/api/files/upload?projectId={urllib.parse.quote(str(pid))}"
+    path = (f"/api/files/{version_file_id}/versions" if version_file_id else
+            f"/api/files/upload?projectId={urllib.parse.quote(str(pid))}"
             f"&name={urllib.parse.quote(filename)}")
     head = (
         f"POST {path} HTTP/1.1\r\n"

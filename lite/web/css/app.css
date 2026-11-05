@@ -1,122 +1,268 @@
-/* app.css — 壳布局与各视图专属样式(侧栏三段式 / 登录 / 项目 / 文档 / 云空间 / 搜索 / 后台 / 设置) */
+/* app.css — 壳布局(40px 顶栏 + 左栏 + 单一内容面)与视图专属样式
+   壳的几何只在这里:顶栏 40、侧栏 240/64、抽屉 480;断点只有 960(形态)与 720(密度) */
 
-/* ============ 壳布局:纯左右(侧栏 + 主区) ============
-   100dvh:手机浏览器地址栏收展时跟随动态视口(满高面板布局的地基);
-   不支持的内核走上一行的 100vh 回退(双声明回退手法与 inset 同源) */
-#shell { height: 100vh; height: 100dvh; display: flex; }
+/* ============ 壳 ============ */
+#shell {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--md-surface);
+}
+#shell-body { flex: 1; min-height: 0; display: flex; }
 
-/* ---- 侧栏三段式:标头+搜索 / 项目树 / 用户卡片 ----
-   默认宽 = 图标栏(--sidebar-w-min):「关」的渲染;「开」的两种形态由下方规则给出 —
-   宽屏内联 240(@media min-961 的 #shell.side-open)、窄屏抽屉(960 的 fixed)。
-   状态只有 UI.dualPanel 的一个布尔(类只有 side-open),本文件不再出现第二套状态类 */
+/* ---- 顶栏 40px:空间切换 / 命令面板 / 通知 / 设置 / 头像 ---- */
+#topbar {
+  height: var(--topbar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  border-bottom: 1px solid var(--md-outline-variant);
+  background: var(--md-surface-container-low);
+}
+#btn-side { display: none; flex: none; }
+.space-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--ctl-l);
+  max-width: 260px;
+  padding: 0 var(--sp-2-5);
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--md-on-surface);
+  font: inherit;
+  font-weight: var(--fw-semi);
+  cursor: pointer;
+  transition: background-color var(--motion-fast);
+}
+.space-switch:hover { background: color-mix(in srgb, var(--md-on-surface) var(--state-hover), transparent); }
+.space-switch > i { color: var(--md-on-surface-variant); font-size: var(--icon-s); }
+.space-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.space-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  background: var(--md-primary);
+  flex: none;
+}
+.space-dot.sm { width: 8px; height: 8px; }
+
+/* ---- 空间切换器浮层(我的空间 / 发现空间) ---- */
+.menu.space-switch-menu {
+  width: 340px;
+  max-width: min(340px, calc(100vw - 16px));
+  padding: 0;
+  overflow: hidden;
+}
+.space-switcher { display: flex; flex-direction: column; min-width: 0; }
+.ss-tabs {
+  display: flex;
+  gap: var(--sp-1);
+  padding: var(--sp-1-5) var(--sp-1-5) 0;
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+.ss-tab {
+  flex: 1;
+  min-height: var(--ctl-l);
+  border: none;
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background-color var(--motion-fast), color var(--motion-fast);
+}
+.ss-tab:hover { background: color-mix(in srgb, var(--md-on-surface) var(--state-hover), transparent); }
+.ss-tab.active {
+  border-radius: 0;
+  box-shadow: inset 0 -2px 0 var(--md-primary);
+  color: var(--md-primary);
+  font-weight: var(--fw-semi);
+}
+.ss-body {
+  flex: 1;
+  min-height: 96px;
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-0-5);
+  padding: var(--sp-1-5);
+}
+.ss-space-row, .ss-disc-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2-5);
+  min-height: var(--ctl-xl);
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-m);
+  cursor: pointer;
+  transition: background-color var(--motion-fast), color var(--motion-fast);
+}
+.ss-space-row:hover, .ss-disc-row:hover {
+  background: color-mix(in srgb, var(--md-on-surface) var(--state-hover), transparent);
+}
+.ss-space-row.current { background: var(--md-primary-container); color: var(--md-on-primary-container); }
+.ss-space-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); }
+.ss-space-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+}
+.ss-disc-row .ss-space-main { flex-direction: column; align-items: flex-start; gap: 0; }
+.ss-disc-desc {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--md-on-surface-variant);
+  font-size: var(--fs-label);
+}
+.ss-current { flex: none; color: var(--md-primary); font-size: var(--icon-s); }
+.ss-space-row.current .ss-current { color: inherit; }
+.ss-more { flex: none; opacity: .55; }
+.ss-space-row:hover .ss-more { opacity: 1; }
+.ss-disc-row .btn { flex: none; }
+.ss-foot {
+  display: flex;
+  gap: var(--sp-1);
+  padding: var(--sp-1-5);
+  border-top: 1px solid var(--md-outline-variant);
+}
+.ss-foot .btn { flex: 1; justify-content: center; }
+
+/* ---- 通知 ---- */
+#btn-notify { position: relative; }
+#btn-notify.has-unread::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--md-error);
+  box-shadow: 0 0 0 2px var(--md-surface-container-low);
+  pointer-events: none;
+}
+.menu.notify-menu {
+  width: 340px;
+  max-width: min(340px, calc(100vw - 16px));
+  padding: 0;
+  overflow: hidden;
+}
+.notify-panel { display: flex; flex-direction: column; min-width: 0; }
+.notify-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+.notify-title { font-weight: var(--fw-semi); }
+.notify-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--sp-1-5);
+  border-top: 1px solid var(--md-outline-variant);
+}
+.notify-list {
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-0-5);
+  padding: var(--sp-1-5);
+}
+.notify-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  border: none;
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-fast);
+}
+.notify-item:hover { background: color-mix(in srgb, var(--md-on-surface) var(--state-hover), transparent); }
+.notify-item.unread { background: color-mix(in srgb, var(--md-primary-container) 55%, transparent); }
+.notify-dot {
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: var(--radius-full);
+  background: transparent;
+  flex: none;
+}
+.notify-item.unread .notify-dot { background: var(--md-primary); }
+.notify-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.notify-item-title { font-size: var(--fs-sm); font-weight: var(--fw-medium); }
+.notify-body {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--md-on-surface-variant);
+  font-size: var(--fs-label);
+}
+.notify-time { color: var(--md-on-surface-variant); font-size: var(--fs-xs); }
+
+.cmd-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--ctl-l);
+  width: min(420px, 42vw);
+  margin-left: var(--sp-2);
+  padding: 0 var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-m);
+  background: var(--md-surface-container);
+  color: var(--md-on-surface-variant);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-fast), border-color var(--motion-fast);
+}
+.cmd-trigger:hover { background: var(--md-surface-container-high); border-color: var(--md-outline-variant); }
+.cmd-trigger span { flex: 1; }
+.cmd-trigger kbd {
+  flex: none;
+  padding: 1px var(--sp-1-5);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--radius-s);
+  font-family: var(--font);
+  font-size: var(--fs-xs);
+  color: var(--md-on-surface-variant);
+}
+.topbar-actions { display: flex; align-items: center; gap: var(--sp-1); margin-left: auto; }
+.topbar-avatar { padding: 2px; }
+
+/* ---- 左栏:空间导航 / 唯一文档树 / 云空间与回收站 ---- */
 #sidebar {
-  width: var(--sidebar-w-min);
+  width: var(--sidebar-w);
   flex: none;
   display: flex;
   flex-direction: column;
-  padding: var(--sp-3);
+  padding: var(--sp-2);
   overflow: hidden;
   background: var(--md-surface-container-low);
   transition: width var(--motion);
 }
-.side-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
-
-/* 顶部标头行:TeamDoc 文字标 + 常驻折叠按钮 */
-.side-brand-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex: none;
-  padding: var(--sp-0-5) var(--sp-1) var(--sp-2);
-}
-.side-brand {
-  padding: 0 var(--sp-2-5);
-  font-size: var(--fs-title);
-  font-weight: var(--fw-semi);
-  color: var(--md-on-surface);
-  white-space: nowrap;
-}
-.side-brand:hover { text-decoration: none; color: var(--md-primary); }
-
-/* 顶部搜索框 */
-.side-search {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  height: var(--ctl-l);
-  flex: none;
-  margin-bottom: var(--sp-2-5);
-  padding: 0 var(--sp-3-5);
-  border-radius: var(--radius-full);
-  background: var(--md-surface-container-high);
-  color: var(--md-on-surface-variant);
-  transition: background-color var(--motion-fast), box-shadow var(--motion-fast);
-}
-.side-search:focus-within {
-  background: var(--md-surface-container-lowest);
-  box-shadow: var(--focus-ring);
-}
-.side-search > i { font-size: var(--icon-l); flex: none; }
-.side-search input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  background: none;
-  outline: none;
-  font: inherit;
-  font-size: var(--fs-sm);
-  color: var(--md-on-surface);
-}
-
-/* 折叠态替代搜索框的搜索按钮:尺寸与 .side-item 一致,默认隐藏(见折叠规则) */
-.side-search-btn {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: var(--ctl-xl);
-  height: var(--ctl-xl);
-  flex: none;
-  margin-bottom: var(--sp-2-5);
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-full);
-  background: transparent;
-  color: var(--md-on-surface-variant);
-  font-size: var(--icon-l);
-  cursor: pointer;
-  transition: background-color var(--motion-fast), color var(--motion-fast);
-}
-.side-search-btn:hover { background: color-mix(in srgb, var(--md-on-surface) var(--state-hover), transparent); color: var(--md-on-surface); }
-
-/* 底部用户卡片 */
-.side-user {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2-5);
-  flex: none;
-  min-height: var(--ctl-2xl);
-  margin-top: var(--sp-2-5);
-  padding: var(--sp-1-5) var(--sp-2);
-  border: none;
-  border-radius: var(--radius-m);
-  background: none;
-  color: var(--md-on-surface);
-  font: inherit;
-  cursor: pointer;
-  text-align: left;
-  transition: background-color var(--motion-fast);
-}
-.side-user:hover { background: color-mix(in srgb, var(--md-on-surface) var(--state-hover), transparent); }
-.side-user .side-user-name {
-  flex: 1;
-  min-width: 0;
-  font-weight: var(--fw-medium);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.side-user > i { color: var(--md-on-surface-variant); font-size: var(--icon-l); }
-
+.side-nav, .side-foot { display: flex; flex-direction: column; gap: var(--sp-0-5); flex: none; }
+.side-foot { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--md-outline-variant); }
 .side-item {
   display: flex;
   align-items: center;
@@ -132,123 +278,96 @@
 }
 .side-item:hover { background: color-mix(in srgb, var(--md-on-surface) var(--state-hover), transparent); text-decoration: none; }
 .side-item.active { background: var(--md-primary-container); color: var(--md-on-primary-container); }
-.side-sep { height: 1px; margin: var(--sp-2-5) var(--sp-2); background: var(--md-outline-variant); flex: none; }
-/* 侧栏内的行内空提示:与 .empty-state.sm 的区别是它嵌在项目树的行内、
-   不做居中块,故独立保留(形状不同,不是重复实现) */
-.side-empty { padding: var(--sp-1) var(--sp-3-5); font-size: var(--fs-label); color: var(--md-on-surface-variant); }
-/* 侧栏计数徽标复用 .badge.xs,此处只补选中态跟随 */
-.side-item.active .badge { background: color-mix(in srgb, var(--md-on-primary-container) var(--state-selected), transparent); color: inherit; }
-/* 图标统一:导航/功能图标 20px;chevron 16px */
+.side-item.disabled { opacity: var(--opacity-disabled); cursor: default; }
+.side-item.disabled:hover { background: transparent; }
 .side-item i { font-size: var(--icon-l); flex: none; }
+.side-label { overflow: hidden; text-overflow: ellipsis; }
+.side-collapse { margin-top: auto; align-self: flex-start; color: var(--md-on-surface-variant); }
 
-/* 侧栏项目树:项目行 = chevron + 纯文字名(去图标化,与子项拉开层级);子项 = 缩进 + 图标 + 名
-   结构骨架由 UI.tree 产出(.tree-node/.tree-row/.tree-caret/.tree-children),侧栏变体 =
-   容器 #side-projects + 行类 .side-item/.side-proj;子项链接包在 .side-tree-children 里 */
-#side-projects .tree-node { display: flex; flex-direction: column; gap: var(--sp-0-5); }
-.side-tree-children { display: flex; flex-direction: column; gap: var(--sp-0-5); }
-.side-proj { font-weight: var(--fw-semi); }
-/* 项目节点行是 button(纯展开/收起,不导航),需 button 重置 */
-button.side-proj { border: none; background: none; font: inherit; cursor: pointer; width: 100%; text-align: left; }
-/* chevron 槽 20px(padding 14 + 槽 20 + 间隙 12 = 46px,项目名与全局导航项文字左缘对齐) */
-.side-item .tree-caret {
-  width: var(--icon-l);
-  text-align: center;
+/* 唯一文档树槽位:文档模块写、离开即清空;折叠态整块隐藏(只留图标列) */
+.side-doc-tree {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--md-outline-variant);
+}
+.side-doc-tree:empty { display: none; }
+.side-doc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   flex: none;
+  padding: 0 var(--sp-1) var(--sp-1);
+}
+.side-doc-title {
+  padding-left: var(--sp-2-5);
+  font-size: var(--fs-label);
+  font-weight: var(--fw-semi);
+  letter-spacing: .02em;
   color: var(--md-on-surface-variant);
-  transition: transform var(--motion-fast);
 }
-.side-item .tree-caret i { font-size: var(--icon-s); } /* 覆盖 .side-item i 的 20px,chevron 用 16px */
-/* 展开旋转:侧栏与文档树(.doc-tree .tree-caret)原是两份同构规则,合并为一份 */
-.tree-caret.open { transform: rotate(90deg); }
-/* 子项缩进 = 项目行的 padding + chevron 槽 + 间隙,与项目名文字左缘成一条竖线。
-   由令牌推导,不再写死 46px(那样改任一档都会失准) */
-.side-subitem {
-  height: var(--ctl-m);
-  padding: 0 var(--sp-3-5) 0 calc(var(--sp-3-5) + var(--icon-l) + var(--sp-3));
-  font-size: var(--fs-sm);
-  font-weight: 400;
-}
-/* 当前项目节点:弱化高亮(浅色底),与子项药丸 active 区分 */
-.side-proj.current { background: color-mix(in srgb, var(--md-on-surface) var(--state-hover), transparent); color: var(--md-on-surface); }
-/* 折叠图标栏态的项目行替身:首字头像(渲染于模板,宽屏展开时隐藏) */
-.side-proj-avatar { display: none; }
-.side-label { overflow: hidden; text-overflow: ellipsis; transition: opacity var(--motion-fast); }
-/* 项目名占满中间空间(取代内联 style="flex:1") */
-.side-proj-name { flex: 1; }
+.side-doc-tree .doc-tree { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 var(--sp-2); }
 
-/* 图标栏(rail)形态 = 「关」的唯一渲染:宽屏未开(72px 内联)/ 窄屏未开(常驻图标栏)共用。
-   不按宽度 scoping —— 「开」的窄屏形态是 fixed 抽屉,与内联天然互斥,rail 规则无需关心宽度。
-   整个面板只有一个布尔(UI.dualPanel 的 open),类只有 side-open 一个 */
-#shell:not(.side-open) #sidebar { width: var(--sidebar-w-min); padding: var(--sp-3) var(--sp-2-5); align-items: center; }
-#shell:not(.side-open) .side-brand { display: none; }
-#shell:not(.side-open) .side-brand-row { justify-content: center; padding-left: 0; padding-right: 0; }
+/* 折叠态 = 纯图标列(无树、无文字);宽屏与窄屏共用同一个布尔 side-open */
+#shell:not(.side-open) #sidebar { width: var(--sidebar-w-min); padding-left: var(--sp-2); padding-right: var(--sp-2); align-items: center; }
 #shell:not(.side-open) .side-label { display: none; }
-/* rail 态:搜索框让位给搜索按钮(宽屏 rail 时也有了可见的搜索入口,此前只能 Ctrl+K) */
-#shell:not(.side-open) .side-search { display: none; }
-#shell:not(.side-open) .side-search-btn { display: inline-flex; }
+#shell:not(.side-open) .side-doc-tree { display: none; }
 #shell:not(.side-open) .side-item { justify-content: center; width: var(--ctl-xl); padding: 0; }
-#shell:not(.side-open) .side-user { justify-content: center; padding: var(--sp-1-5); }
-#shell:not(.side-open) .side-user > i { display: none; }
-/* 树折叠为图标:chevron 隐藏,项目行显示彩色首字头像,子项以图标形式堆在节点下方(仍可点击导航)。
-   .tree-caret 也出现在主区文档树里,故此规则必须锚到 #sidebar,不能沿用裸类名 */
-#shell:not(.side-open) #sidebar .tree-caret { display: none; }
-#shell:not(.side-open) .side-proj-avatar { display: inline-flex; }
-#shell:not(.side-open) .side-tree-children { align-items: center; }
+#shell:not(.side-open) .side-collapse { align-self: center; }
 
-/* 宽屏内联形态(>960):「开」= 完整 240px 内联(挤压主区),宽度过渡在 #sidebar 上 */
+/* 宽屏:开 = 240 内联(宽度过渡在 #sidebar 上) */
 @media (min-width: 961px) {
   #shell.side-open #sidebar { width: var(--sidebar-w); }
 }
 
-/* 窄屏:「开」= 抽屉浮出完整侧栏(布局同宽屏内联,故不再需要顶条);
-   遮罩点击 / Esc / 选中导航项后收起(JS 见 ui.js 的 UI.dualPanel) */
+/* 窄屏:左栏变抽屉;关 = 完全移出屏外(不是 72px 图标栏) */
 @media (max-width: 960px) {
-  #main { min-height: 0; } /* 允许收缩,溢出由 #main 自身滚动 */
-  #shell.side-open #sidebar {
+  #btn-side { display: inline-flex; }
+  #side-collapse { display: none; }
+  #sidebar {
     position: fixed;
-    top: 0;
-    left: 0;
+    top: var(--topbar-h);
     bottom: 0;
+    left: 0;
     z-index: var(--z-drawer);
-    width: var(--sidebar-w);
+    width: min(var(--sidebar-w), 85vw);
+    visibility: hidden;
+    transform: translateX(-100%);
     box-shadow: var(--shadow-2);
-    animation: drawer-in var(--motion);
+    transition: transform var(--motion), visibility var(--motion);
+  }
+  #shell.side-open #sidebar { visibility: visible; transform: translateX(0); }
+  #shell.side-open .side-scrim { display: block; }
+  .cmd-trigger { width: auto; flex: 1; min-width: 0; }
+  .cmd-trigger kbd { display: none; }
+  #main { min-height: 0; }
+  .settings-page { grid-template-columns: minmax(0, 1fr); }
+  .settings-nav { flex-direction: row; overflow-x: auto; position: static; }
+  .home-grid { grid-template-columns: minmax(0, 1fr); }
+  .drawer-box { width: 100%; }
+  /* 切换器/通知在窄屏是整行浮层(与抽屉同宽的上下文) */
+  .menu.space-switch-menu, .menu.notify-menu {
+    left: var(--sp-2) !important;
+    right: var(--sp-2);
+    width: auto;
+    max-width: none;
   }
 }
-@keyframes drawer-in {
-  from { transform: translateX(calc(var(--sp-8) * -1)); }
-  to { transform: translateX(0); }
-}
-
-/* 抽屉遮罩(仅窄屏抽屉展开时显示);定位/配色/淡入在 components.css 的 .scrim 基类,
-   这里只声明显示条件 */
-@media (max-width: 960px) {
-  #shell.side-open .side-scrim { display: block; }
-}
-
 /* ---- 主区 ---- */
 #main { flex: 1; min-width: 0; overflow-y: auto; background: var(--md-surface); }
-/* 页宽的唯一归属地:内容横向范围只在这里决定,页头与内容因此必然同宽。
-   两档 ——
-     默认(--w-page 1120):表格 / 列表 / 卡片栅格,需要横向铺开
-     page-narrow(--w-page-narrow 800):纯表单 / 设置页,单列阅读
-   页面内的卡片与单个元素**不得**再限宽(此前 .w-form/.w-list 挂在卡片上,
-   造成"页头 880、下面的卡 720、再下面的表 880"这种同页多宽) */
 #view {
   padding: var(--sp-6) var(--g-page);
   max-width: var(--w-page);
 }
 #view.page-narrow { max-width: var(--w-page-narrow); }
-/* 文档页填满主区:整链 flex 继承高度(#view.view-fill → #proj-body → .docs-wrap → .doc-editor-col → .editor-scroll),
-   不再用 calc(100vh - Npx) 魔数;padding 归零让文档页满出血,内边距下放到 .doc-tree-col / .editor-head;
-   页宽不限:文档页是"树列 + 编辑区"的双栏满出血布局,编辑器自带 --w-read 阅读行宽;
-   这条满高链在窄屏同样成立(树列以抽屉浮出,见上方"树面板双态") */
+/* 文档页满高:树在左栏,主区只剩编辑列;整链 flex 继承高度,内边距归编辑器头 */
 #view.view-fill { display: flex; flex-direction: column; height: 100%; padding: 0; max-width: none; }
 #view.view-fill #proj-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
-/* .page-head / .page-title / .page-sub 已升格到 components.css(6 个视图共用) */
-
-/* ============ 登录页(大面积 primary-container 渐变背景) ============ */
+/* ============ 登录页 ============ */
 .login-page {
   min-height: 100vh;
   display: flex;
@@ -256,13 +375,12 @@ button.side-proj { border: none; background: none; font: inherit; cursor: pointe
   justify-content: center;
   padding: var(--sp-6);
   background:
-    radial-gradient(900px 480px at 85% -10%, color-mix(in srgb, var(--md-primary-container) 80%, transparent), transparent 65%),
-    radial-gradient(700px 420px at 5% 110%, color-mix(in srgb, var(--md-primary-container) 55%, transparent), transparent 60%),
+    radial-gradient(900px 480px at 85% -10%, color-mix(in srgb, var(--md-primary-container) 70%, transparent), transparent 65%),
+    radial-gradient(700px 420px at 5% 110%, color-mix(in srgb, var(--md-primary-container) 45%, transparent), transparent 60%),
     var(--md-surface-container-low);
 }
 .login-card {
   width: 100%;
-  /* 登录卡比模态框窄一档:居中呈现时留出呼吸,避免"整屏一个方框"的压迫感 */
   max-width: calc(var(--modal-w) - 80px);
   background: var(--md-surface-container-lowest);
   border-radius: var(--radius-xl);
@@ -277,99 +395,87 @@ button.side-proj { border: none; background: none; font: inherit; cursor: pointe
   font-size: var(--fs-headline);
   font-weight: var(--fw-semi);
 }
-.login-sub {
-  text-align: center;
+.login-logo {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-l);
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+  font-size: var(--icon-l);
+}
+.login-sub { text-align: center; color: var(--md-on-surface-variant); margin: var(--sp-1-5) 0 var(--sp-6); }
+.bootstrap-steps { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-5); }
+.bs-step {
+  flex: 1;
+  padding: var(--sp-1-5) var(--sp-2);
+  border-radius: var(--radius-m);
+  background: var(--md-surface-container);
   color: var(--md-on-surface-variant);
-  margin: var(--sp-1-5) 0 var(--sp-6);
+  font-size: var(--fs-label);
+  text-align: center;
 }
-/* 登录页的提示统一走 components.css 的 .banner(此前另有一套 .login-err,
-   与 .banner.danger/.info 完全同构;现由 UI.banner 产出) */
+.bs-step.done { color: var(--md-success); }
+.bs-step.current { background: var(--md-primary-container); color: var(--md-on-primary-container); font-weight: var(--fw-semi); }
 
-/* ============ 项目首页 ============ */
-/* 项目卡与卡片栅格统一收敛到 components.css 的 .card-grid / .card-link */
-
-/* ============ 文档模块 ============ */
-/* 平铺布局:树列与编辑区同底色,只用 1px 分隔线区隔(早期是圆角+浅底的"悬浮面板",
-   在满高布局里既产生悬浮感又浪费横向空间)。#view.view-fill 的内边距归零以满出血,
-   内边距改由 .editor-head 与 .doc-tree-col 各自承担 */
-.docs-wrap { display: flex; gap: 0; align-items: stretch; flex: 1; min-height: 0; }
-/* 列框 = 纯裁剪框:宽度过渡 + overflow 裁切都归它,但**不承载水平内边距** ——
-   内边距归内容层(.doc-tree-inner)。此前内边距在列上、内容却用 min-width: var(--w-tree)
-   锁宽:锁的是边框盒宽,内容盒还要再减 padding,溢出部分被 overflow 裁掉,
-   树行右间距归零、树头按钮贴死分隔线(左右不对称的根源)。
-   结构分离后"锁内容宽"由内容层恒宽天然达成,不再有对不齐的第三处数字 */
-.doc-tree-col {
-  width: 0;
-  flex: none;
-  border-right: 1px solid transparent;
+/* ============ 空间首页 / 最近 / 收藏 ============ */
+.home-hero {
   display: flex;
-  flex-direction: column;
-  max-height: 100%;
-  overflow: hidden; /* 折叠动画期间内容由这里裁掉;行内菜单浮层挂 body(fixed),不受裁切影响 */
-  /* 默认 = 关:宽 0 + 边框透明;开(tree-open)的形态由下方两条规则按宽度给出。
-     宽度与边框色一起过渡,开/关都不留可见跳变 */
-  transition: width var(--motion), border-right-color var(--motion);
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-6);
 }
-/* 内容层:整列宽度与水平内边距的唯一所在。收起动画期间它保持整宽、被列框裁切,
-   不半路回流换行(工具栏按钮掉下来那种抖动),且左右边距恒对称 */
-.doc-tree-inner {
-  width: var(--w-tree);
-  height: 100%;
+.home-sub { margin-top: var(--sp-1); color: var(--md-on-surface-variant); }
+.home-actions { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+.home-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr); gap: var(--sp-6); align-items: start; }
+.home-section { min-width: 0; }
+.home-doc-list { display: flex; flex-direction: column; gap: var(--sp-0-5); }
+.home-doc-row {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2-5);
+  min-height: var(--row-h);
   padding: 0 var(--sp-2);
+  border-radius: var(--radius-l);
+  transition: background-color var(--motion-fast);
 }
-/* ---- 树面板:一个布尔(tree-open)、两种形态,960 裁定 ----
-   状态机与壳侧栏同一份(ui.js 的 UI.dualPanel,单布尔单类):「开」的宽屏形态是
-   内联列、「开」的窄屏形态是抽屉,规则各一条;「关」由 .doc-tree-col 默认(width 0 /
-   窄屏 hidden)表达。断点用壳侧栏的同一档(960):壳层进入"图标栏 + 抽屉"的窄屏世界时,
-   文档树作为另一块左侧导航面板没有理由还留在内联 —— 否则 721~960 之间 260px 树列
-   会把编辑区挤到只剩四百来像素。JS 侧不做任何宽度分支 */
-/* 宽屏内联形态(>960):开 = 展开为整列;关 = 上面的默认宽 0 */
-@media (min-width: 961px) {
-  .docs-wrap.tree-open .doc-tree-col {
-    width: var(--w-tree);
-    border-right-color: var(--md-outline-variant);
-  }
+.home-doc-row:hover { background: color-mix(in srgb, var(--md-on-surface) var(--state-hover), transparent); }
+.home-doc-icon { flex: none; }
+.home-doc-link { flex: 1; min-width: 0; display: flex; flex-direction: column; color: inherit; }
+.home-doc-link:hover { text-decoration: none; }
+.home-doc-title { font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-doc-sub { font-size: var(--fs-label); color: var(--md-on-surface-variant); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-empty-extra { justify-content: center; margin-top: var(--sp-4); }
+
+/* ============ 文档模块:主区只剩编辑列 ============ */
+.doc-editor-col { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; }
+.editor-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2-5);
+  padding: var(--sp-4) var(--editor-x) 0;
+  margin-bottom: var(--sp-2-5);
+  flex: none;
 }
-/* 窄屏(≤960,与壳侧栏窄屏同档,JS 侧唯一来源是 ui.js 的 UI.NARROW):树列变左侧全高抽屉
-   (编辑区满幅,替代早期"树占顶部 40vh + 整页滚动");默认移出屏外且不可聚焦(visibility 而非位移 ——
-   移出屏的元素仍在 Tab 序里),tree-open 时滑入,遮罩点击 / Esc / 选中导航项后收起。
-   抽屉宽与宽屏内列同档(--w-tree),同一面板一个宽度令牌;极窄屏按 85vw 收 */
-@media (max-width: 960px) {
-  .doc-tree-col {
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    z-index: var(--z-drawer);
-    width: min(var(--w-tree), 85vw);
-    background: var(--md-surface);
-    border-right-color: var(--md-outline-variant); /* 抽屉恒有右缘;默认态的"透明"只服务宽屏宽 0 */
-    visibility: hidden;
-  }
-  /* 抽屉态没有收起动画,内容层跟随抽屉宽(85vw 的极小屏也不再溢出) */
-  .doc-tree-col > .doc-tree-inner { width: 100%; }
-  .docs-wrap.tree-open .doc-tree-col { visibility: visible; animation: drawer-in var(--motion); }
-  .docs-wrap.tree-open .doc-tree-scrim { display: block; }
-}
-/* 文档树头:复用 .toolbar 的行布局,但保留自己的内边距与下边距
-   (它嵌在 .doc-tree-inner 里,不能沿用 toolbar 的外边距) */
-.doc-tree-head {
-  padding: var(--sp-4) var(--sp-2) var(--sp-2-5);
-  margin-bottom: 0;
-}
-.doc-tree { flex: 1; overflow-y: auto; padding: 0 0 var(--sp-3); }
-/* 树骨架由 UI.tree 产出(.tree-node/.tree-row/.tree-caret/.tree-children),文档树变体 =
-   容器 .doc-tree + 行类 .tree-row.doc-row(原 .doc-ul/.doc-row/.doc-caret/.doc-children 的等价迁移) */
-.doc-tree .tree-children { padding-left: var(--tree-indent); } /* 每层缩进(原 .doc-children .doc-ul) */
+.head-tools { display: flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
+.save-status { font-size: var(--fs-label); color: var(--md-on-surface-variant); flex: none; min-width: 96px; text-align: right; }
+.save-status.conflict { color: var(--md-error); font-weight: 600; cursor: pointer; }
+.editor-head #btn-save { flex: none; }
+.presence-inline { display: inline-flex; flex: none; }
+.remote-bar { margin: 0 var(--editor-x) var(--sp-2-5); flex: none; }
+
+/* 文档树(左栏):行与折叠沿用 UI.tree 骨架 */
+.doc-tree .tree-children { padding-left: var(--tree-indent); }
 .tree-row.doc-row {
   display: flex;
   align-items: center;
   gap: var(--sp-1);
   height: var(--ctl-m);
   padding: 0 var(--sp-3);
-  border-radius: var(--radius-full); /* 与侧栏导航项 .side-item 一致的胶囊形(Material You 导航抽屉规范) */
+  border-radius: var(--radius-full);
   cursor: pointer;
   color: var(--md-on-surface-variant);
   transition: background-color var(--motion-fast), color var(--motion-fast);
@@ -388,53 +494,13 @@ button.side-proj { border: none; background: none; font: inherit; cursor: pointe
   font-size: var(--icon-s);
 }
 .doc-tree .tree-caret:hover { background: color-mix(in srgb, var(--md-on-surface) var(--state-active), transparent); }
-/* 展开旋转 .tree-caret.open 见上方侧栏树(两棵树共用一份) */
+.tree-caret.open { transform: rotate(90deg); }
 .doc-tree .tree-caret.leaf { visibility: hidden; }
 .doc-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-body); }
-/* 文档图标:与列表行图标同色系(文档=蓝) */
 .doc-icon { color: var(--file-doc); font-size: var(--icon-m); flex: none; }
-/* 树行的操作按钮:常驻可见(触屏没有 hover,悬停揭示会让"新建子文档/更多"不可达)。
-   行高仅 --ctl-m(32),故按钮取更小的 --ctl-s,否则 32px 按钮会顶满整行高度 */
 .doc-acts { display: inline-flex; align-items: center; gap: 0; --ctl-h: var(--ctl-s); }
 
-/* 编辑器栏 */
-.doc-editor-col { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; }
-.editor-head {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2-5);
-  /* 满出血布局下由编辑器头承担上/水平内边距;水平方向消费 --editor-x
-     (editor.css,编辑列水平节奏的唯一来源),与正文画布/远程条永远同线 */
-  padding: var(--sp-4) var(--editor-x) 0;
-  margin-bottom: var(--sp-2-5);
-  flex: none;
-}
-/* 文档标题(.doc-title-input)已随"标题 = 正文列第一个块"迁到 editor.css;
-   顶栏两区:左 = 树开关,右 = 工具组 */
-/* 推右的锚点必须挂在这个**任何屏宽都存在**的容器上 —— 此前挂在 save-status 上,
-   它在 ≤720 恰好是隐藏的,工具组随即失去右锚点、整排挤到树开关旁边 */
-.head-tools { display: flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
-/* 保存状态栏给固定宽度,避免"保存中…/已保存 ✓"文案长度变化时右侧控件左右抖动 */
-.save-status { font-size: var(--fs-label); color: var(--md-on-surface-variant); flex: none; min-width: 96px; text-align: right; }
-/* 冲突态:保存已暂停,这一点必须一直可见(否则用户接着敲字以为在存)。
-   状态栏同时是可点入口 —— 弹窗被关掉后还能从这里重新打开 */
-.save-status.conflict { color: var(--md-error); font-weight: 600; cursor: pointer; }
-/* 保存按钮紧跟状态栏:不参与拉伸(状态文案长度变化时按钮不该跟着左右动) */
-.editor-head #btn-save { flex: none; }
-.presence-inline { display: inline-flex; flex: none; }
-
-/* 远程更新提示条:复用 .banner.primary,此处只补满出血布局下的外边距
-   (左右消费 --editor-x,与 .editor-head/.editor-canvas 同线)与不被压缩 */
-.remote-bar { margin: 0 var(--editor-x) var(--sp-2-5); flex: none; }
-
-/* 编辑器容器与源码/预览样式统一收敛到 editor.css */
-
-/* 云空间列宽与分隔线:表头与数据行共用同一组列宽(见 components.css .data-table 注释)。
-   末列必须是固定宽度 —— 表头该格为空、数据行该格含按钮,用 auto 会让各列错位,
-   行与行之间(文件夹与文件的按钮数不同)也会互不对齐。
-   --acts-n: 6 = 文件行最多 6 个按钮(预览/下载/重命名/公开/移动/删除),
-   文件夹行较少但列宽按最大者取齐,故 --col-acts 由 6 × --ctl-m 派生。
-   分隔线取 50% 更淡:文件列表以"扫名称"为主,过重的线会与图标配色打架 */
+/* ============ 云空间列宽(行样式在 components.css) ============ */
 .drive-table {
   --col-check: var(--ctl-m);
   --col-size: 110px;
@@ -443,39 +509,157 @@ button.side-proj { border: none; background: none; font: inherit; cursor: pointe
   --tpl: var(--col-check) minmax(0, 1fr) var(--col-size) var(--col-time) var(--col-acts);
   --divider: 50%;
 }
-/* 视图切换段:与右侧按钮组之间留间距(工具栏内的成组间隔由元素自身承担) */
 .drive-view-seg { margin-right: var(--sp-3); flex: none; }
-/* 网格视图:列头是给列表的(名称/大小/时间),对瓦片没有意义,整行隐藏。
-   批量操作栏在选中时会替换列头,所以只在"未选中"时隐藏(见下面的 :not) */
 .drive-grid-mode .data-table-head:not(.selecting) { display: none; }
 
+/* ============ 命令面板(Ctrl+K) ============ */
+.cmd-mask {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  background: color-mix(in srgb, var(--md-scrim) 70%, transparent);
+  animation: fade-in var(--motion-fast);
+}
+.cmd-panel {
+  width: min(640px, 92vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  background: var(--md-surface-container-high);
+  box-shadow: var(--shadow-2);
+}
+.cmd-input-row { display: flex; align-items: center; gap: var(--sp-2-5); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--md-outline-variant); }
+.cmd-input-row > i { color: var(--md-on-surface-variant); }
+.cmd-input { flex: 1; min-width: 0; border: none; outline: none; background: none; font: inherit; font-size: var(--fs-title); color: var(--md-on-surface); }
+.cmd-input-row kbd { padding: 1px var(--sp-1-5); border: 1px solid var(--md-outline-variant); border-radius: var(--radius-s); font-size: var(--fs-xs); color: var(--md-on-surface-variant); }
+.cmd-list { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-1-5); }
+.cmd-group { padding: var(--sp-1-5) var(--sp-2-5) var(--sp-0-5); font-size: var(--fs-label); font-weight: var(--fw-semi); color: var(--md-on-surface-variant); }
+.cmd-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2-5);
+  width: 100%;
+  min-height: 40px;
+  padding: var(--sp-1) var(--sp-2-5);
+  border: none;
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--md-on-surface);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cmd-row:hover, .cmd-row.active { background: var(--md-surface-container-highest); }
+.cmd-row-icon { color: var(--md-on-surface-variant); font-size: var(--icon-m); flex: none; }
+.cmd-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cmd-row-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-row-sub { font-size: var(--fs-label); color: var(--md-on-surface-variant); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-foot { display: flex; gap: var(--sp-4); padding: var(--sp-1-5) var(--sp-4); border-top: 1px solid var(--md-outline-variant); font-size: var(--fs-label); color: var(--md-on-surface-variant); }
 
+/* ============ 右侧抽屉(空间设置 / 版本历史) ============ */
+.drawer-mask {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  justify-content: flex-end;
+  background: color-mix(in srgb, var(--md-scrim) 70%, transparent);
+  animation: fade-in var(--motion-fast);
+}
+.drawer-box {
+  width: var(--drawer-w);
+  max-width: 100vw;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--md-surface-container-high);
+  border-radius: var(--radius-xl) 0 0 var(--radius-xl);
+  box-shadow: var(--shadow-2);
+  animation: drawer-in-right var(--motion);
+}
+.drawer-box.closing, .drawer-mask.closing { opacity: 0; transition: opacity var(--motion-fast); }
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+.drawer-head h3 { font-size: var(--fs-title); font-weight: var(--fw-semi); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
+@keyframes drawer-in-right { from { transform: translateX(100%); } to { transform: translateX(0); } }
 
-/* 行图标、文件名、引用徽标、行内操作组、.fi-* 配色均统一在 components.css 的
-   .data-table / .list-row 段落中定义 */
+/* ============ 空间设置抽屉内容 ============ */
+.ss-body { display: flex; flex-direction: column; gap: var(--sp-4); }
+.ss-color-row { display: flex; align-items: center; gap: var(--sp-2); }
+.ss-quota-line { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--sp-1-5); }
+.ss-quota-bar { height: var(--bar-h); border-radius: var(--radius-full); background: var(--md-surface-container-highest); overflow: hidden; }
+.ss-quota-bar > span { display: block; height: 100%; background: var(--md-primary); }
+.ss-member-head { display: flex; gap: var(--sp-2); align-items: center; }
+.ss-member-head .input { flex: 1; }
+.ss-batch {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--radius-m);
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+}
+.ss-batch .select { width: 120px; }
+.ss-member .sel-box { flex: none; }
+.ss-member .list-row-acts { gap: var(--sp-1); }
+.ss-perms { border-top: 1px solid var(--md-outline-variant); padding-top: var(--sp-2); }
+.ss-perms summary { cursor: pointer; font-size: var(--fs-sm); color: var(--md-on-surface-variant); }
+.ss-perm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); margin-top: var(--sp-2); font-size: var(--fs-label); }
+.ss-perm-grid b { display: block; color: var(--md-on-surface); }
+.ss-perm-grid span { color: var(--md-on-surface-variant); }
 
-/* 成员 / 回收站 / 令牌等弹性列表行统一收敛到 components.css 的 .list-row;
-   回收站分类切换用 .seg.auto(见 components.css) */
-
-/* ============ 搜索页 ============ */
-/* 结果卡片与分组标题统一收敛到 components.css 的 .list-row.raised / .section-title */
-
-/* ============ 管理后台 ============ */
-/* 用户表统一收敛到 components.css 的 .data-table */
-
-/* ============ 个人设置 ============ */
-/* 设置卡统一收敛到 components.css 的 .card-grid.wide + .card + .list-row */
+/* ============ 个人设置(左子导航 + 右内容) ============ */
+.settings-page {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: var(--sp-6);
+  align-items: start;
+  max-width: 960px;
+  margin: 0 auto;
+}
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-0-5);
+  position: sticky;
+  top: 0;
+}
+.settings-body { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; }
+.settings-body > .page-title { margin-bottom: var(--sp-1); }
+.pref-row { display: flex; align-items: center; gap: var(--sp-4); min-height: var(--row-h); }
+.pref-label { width: 88px; flex: none; color: var(--md-on-surface-variant); font-size: var(--fs-sm); }
+.pref-range { display: flex; align-items: center; gap: var(--sp-3); }
+.pref-preview {
+  margin-top: var(--sp-2);
+  padding: var(--sp-4);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--radius-l);
+  line-height: var(--lh-loose);
+}
 
 /* ============ 密度/功能降档(契约身份 2:控件收纳与重排,不涉及间距阶梯) ============ */
 @media (max-width: 720px) {
-  /* 时间文案太长,重排后的第二行只留"大小 ··· 操作";表格行的重排契约在
-     components.css 的 .data-table 响应式段,这里不再重写列模板 */
   .row-time, .dh-time { display: none; }
-  /* 上传面板贴边更近(浮层定位密度,宽度本身已是连续表达,见 components.css .up-panel) */
   .up-panel {
     right: var(--sp-3);
     bottom: var(--sp-3);
   }
   .hv-layout { flex-direction: column; }
   .hv-list { width: 100%; max-height: 30vh; }
+  .home-hero { flex-direction: column; align-items: flex-start; }
+  .ss-perm-grid { grid-template-columns: 1fr; }
 }

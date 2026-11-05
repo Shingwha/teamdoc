@@ -1,0 +1,22 @@
+{
+  "name": "teamdoc-cm6-vendor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TeamDoc CodeMirror 6 offline IIFE vendor build",
+  "scripts": {
+    "build": "esbuild src/index.js --bundle --format=iife --global-name=CM6 --platform=browser --target=es2020 --minify --sourcemap --legal-comments=eof --outfile=../../web/vendor/codemirror/editor.bundle.js"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "6.20.4",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/search": "6.7.2",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "@lezer/highlight": "1.2.5"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

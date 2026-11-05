@@ -1,15 +1,15 @@
 /* editor.css — 文档编辑器(源码/预览双模式)专属样式
    设计原则:无边框融入主区;全部色值来自 tokens.css 的 --md-* 令牌(Prism 高亮也用令牌派生),
    亮/暗主题与 6 个种子色自动跟随,不另造颜色。
-   范围:编辑器布局 / 源码 textarea / 预览排版 .markdown-body / Prism 令牌映射 /
+   范围:编辑器布局 / CodeMirror 6 源码 / 预览排版 .markdown-body / Prism 令牌映射 /
         teamdoc:// 引用 chip / @ 与 [[ 引用浮层 / 选区浮动工具栏 / 反链栏 */
 
 /* ---------- 1. 编辑器布局:单一滚动容器,正文居中 ----------
-   滚动只发生在 .editor-scroll(滚动条落在页面右缘);.md-source 自动撑高、.doc-preview 自然流,两者自身都不滚动 */
+   普通模式滚动只发生在 .editor-scroll；宽屏分栏由源码与预览窗格各自滚动并联动 */
 /* container-type:编辑头的"精简与否"挂这列的实际宽度做容器查询(见下方 @container)
    —— 顶栏装不装得下取决于 壳侧栏 + 树列开合 两个变量,按视口断点永远猜不准。
-   contain 附带让本列成为 fixed 后代的包含块:本列内没有 fixed 元素(浮层都挂在
-   body 上),抽屉遮罩在 docs-wrap 下,均不受影响 */
+   contain 附带让本列成为 fixed 后代的包含块:窄屏底部工具条(.doc-toolbar)正是
+   按这一列定位的(浮在状态栏上方、不越出编辑区),其余浮层都挂在 body 上,不受影响 */
 /* --editor-x:本列水平节奏的唯一来源。头部、正文画布、远程提示条消费它(定义在
    这三个子元素上,见下方第 9 节),左右同线不靠各处对数字 */
 .doc-editor-col {
@@ -36,7 +36,7 @@
    与页面宽度是两个概念 —— 故不引用 --w-page,而由本文件自带一档 */
 .editor-canvas {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, var(--w-read)) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 800px) minmax(0, 1fr);
   column-gap: var(--sp-8);
   align-items: start;
   min-height: 100%;
@@ -76,14 +76,11 @@
 .editor-head > .btn-icon:first-child { margin-left: calc((var(--ctl-l) - var(--icon-l)) / -2); }
 .head-tools > .btn-icon:last-child { margin-right: calc((var(--ctl-l) - var(--icon-l)) / -2); }
 
-/* 源码 textarea:散文面(与预览、标题同字面 —— 切换模式时正文不重排),无边框透明底,
-   高度由 JS 按 scrollHeight 撑开。一个元素只能有一个字体,而这里散文占多数,所以围栏里
-   的代码也跟散文同脸:代价是缩进线索弱、行内代码不再等宽 */
+/* CodeMirror 6 源码与预览共用散文面和令牌配色。 */
 .md-source {
   display: block;
   width: 100%;
   min-height: 65vh;
-  resize: none;
   overflow: hidden;
   border: none;
   outline: none;
@@ -97,7 +94,6 @@
   white-space: pre-wrap;
   word-wrap: break-word;
 }
-.md-source::placeholder { color: var(--md-on-surface-variant); }
 
 /* ---------- 2. 预览排版 .markdown-body(文档预览与历史版本预览共用) ----------
    节奏参考阅读器排版:行高 1.75、标题层级间距;宽度由 .editor-canvas 网格约束,配色/圆角全走令牌。
@@ -377,8 +373,7 @@ html[data-theme="dark"] a[href^="teamdoc://"]:hover { filter: brightness(1.12); 
 @container (max-width: 600px) {
   .editor-head { gap: var(--sp-2); }
   .editor-head .save-status,
-  .editor-head .presence-inline,
-  .editor-head #btn-history { display: none; }
+  .editor-head .presence-inline { display: none; }
   .editor-head .head-more { display: inline-flex; }
 }
 /* 第二级(手机整宽,编辑列 ≈ 视口 − 76px 图标栏):带标签的分段比可用宽度
@@ -399,4 +394,162 @@ html[data-theme="dark"] a[href^="teamdoc://"]:hover { filter: brightness(1.12); 
 /* 引用浮层挂在 body 上(不在编辑列容器内),其宽度只能按视口约束(契约身份 3) */
 @media (max-width: 720px) {
   .menu.panel { width: min(300px, calc(100vw - var(--sp-6))); }
+}
+
+
+/* CodeMirror 6 文档编辑体验 */
+.md-source[hidden], .doc-preview[hidden], .doc-outline[hidden] { display: none; }
+.md-source { min-height: 65vh; }
+.md-source .cm-editor { min-height: 65vh; }
+.md-source .cm-scroller { overflow: visible; font-family: var(--font); }
+.md-source .cm-line { padding: 0; }
+.doc-meta {
+  min-height: var(--fs-label);
+  margin: 0 0 var(--sp-4);
+  color: var(--md-on-surface-variant);
+  font-size: var(--fs-label);
+}
+.doc-statusbar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4);
+  min-height: var(--ctl-m);
+  padding: var(--sp-1) var(--sp-6);
+  border-top: 1px solid var(--md-outline-variant);
+  color: var(--md-on-surface-variant);
+  background: var(--md-surface);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+/* 保存状态 = 圆点 + 文字(编辑头与状态栏两处同形)。圆点只表达状态,文字才是事实 */
+.save-status, #doc-save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1-5);
+}
+.editor-head .save-status { min-width: 0; text-align: left; }
+.status-dot {
+  flex: none;
+  width: var(--sp-2);
+  height: var(--sp-2);
+  border-radius: var(--radius-full);
+  background: var(--md-outline);
+}
+[data-state="ok"] .status-dot { background: var(--md-primary); }
+[data-state="busy"] .status-dot { background: var(--md-warning-container); animation: pulse-dot 1s ease-in-out infinite; }
+[data-state="warn"] .status-dot { background: var(--md-warning-container); }
+[data-state="error"] .status-dot { background: var(--md-error); }
+@keyframes pulse-dot { 50% { opacity: 0.35; } }
+.doc-statusbar #doc-save-state { margin-left: auto; }
+.doc-statusbar #doc-save-state.conflict { color: var(--md-error); }
+.doc-statusbar .doc-space { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-outline {
+  grid-column: 3;
+  position: sticky;
+  top: var(--sp-4);
+  align-self: start;
+  justify-self: start;
+  width: 220px;
+  max-height: calc(100dvh - 160px);
+  overflow-y: auto;
+  padding: var(--sp-3);
+  color: var(--md-on-surface-variant);
+  font-size: var(--fs-label);
+}
+.doc-outline-title { margin-bottom: var(--sp-2); font-weight: var(--fw-medium); color: var(--md-on-surface); }
+#doc-outline-list { display: flex; flex-direction: column; gap: var(--sp-0-5); }
+#doc-outline-list button {
+  border: none;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  padding: var(--sp-1) var(--sp-2);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#doc-outline-list button:hover, #doc-outline-list button.active {
+  color: var(--md-on-surface);
+  border-left-color: var(--md-primary);
+  background: var(--md-surface-container-low);
+}
+#doc-outline-list .outline-level-2 { padding-left: var(--sp-4); }
+#doc-outline-list .outline-level-3 { padding-left: var(--sp-6); }
+#doc-outline-list .outline-level-4, #doc-outline-list .outline-level-5, #doc-outline-list .outline-level-6 { padding-left: var(--sp-8); }
+.doc-outline-empty { padding: var(--sp-2); }
+.editor-canvas.preview-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1600px) minmax(0, 1fr); }
+.preview-split .doc-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-8);
+  align-items: start;
+}
+.preview-split .md-source, .preview-split .doc-preview {
+  height: calc(100dvh - 250px);
+  min-height: 480px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.preview-split .md-source { min-height: 480px; }
+.preview-split .md-source .cm-editor { height: 100%; min-height: 0; }
+.preview-split .md-source .cm-scroller { overflow: auto; }
+.preview-split .doc-preview {
+  padding-left: var(--sp-8);
+  border-left: 1px solid var(--md-outline-variant);
+}
+.editor-shortcuts { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-3) var(--sp-6); align-items: center; }
+.editor-shortcuts kbd { font-family: var(--font-mono); font-size: var(--fs-label); color: var(--md-on-surface-variant); }
+body.doc-focus-mode #sidebar,
+body.doc-focus-mode .doc-outline, body.doc-focus-mode #doc-mode-seg { display: none; }
+body.doc-focus-mode .editor-canvas { grid-template-columns: minmax(0, 1fr) minmax(0, 800px) minmax(0, 1fr); }
+body.doc-focus-mode .doc-content { grid-column: 2; }
+@media (max-width: 1279px) {
+  /* 大纲按钮与大纲同生共死:窄屏点不到,也就不会出现"点了没反应" */
+  .doc-outline, #btn-doc-outline { display: none; }
+}
+
+/* 窄屏底部浮动工具条:桌面隐藏;≤720 显示。位置/尺寸在基础规则里给足
+   (触控目标 max(40px, 令牌),紧凑密度下也不会缩到 40px 以下),查询块只切换显示 */
+.doc-toolbar {
+  display: none;
+  position: fixed;
+  left: 50%;
+  /* 浮在底部状态栏之上,不压住字数/保存状态 */
+  bottom: calc(var(--ctl-m) + var(--sp-4));
+  transform: translateX(-50%);
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--radius-full);
+  background: var(--md-surface-container-high);
+  box-shadow: var(--shadow-2);
+  z-index: var(--z-panel);   /* 页内固定条:低于遮罩/抽屉/模态框,不压住对话框 */
+}
+.doc-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: max(40px, var(--ctl-xl));
+  height: max(40px, var(--ctl-xl));
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font-size: var(--icon-l);
+  cursor: pointer;
+}
+.doc-tool-btn:hover { background: color-mix(in srgb, var(--md-on-surface) var(--state-hover), transparent); color: var(--md-on-surface); }
+.doc-tool-btn:active { background: color-mix(in srgb, var(--md-on-surface) var(--state-selected), transparent); }
+
+@media (max-width: 720px) {
+  /* 契约身份 2(密度:窄屏底部工具条与状态栏缩排)—— 只切换形态/收紧间距,五项都在 */
+  .doc-toolbar { display: flex; }
+  .editor-scroll { padding-bottom: calc(var(--ctl-xl) + var(--sp-8)); }
+  .doc-statusbar { gap: var(--sp-2); padding-left: var(--sp-4); padding-right: var(--sp-4); }
+  .doc-statusbar .doc-space { max-width: 96px; }
 }

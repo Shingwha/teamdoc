@@ -85,14 +85,71 @@ window.AdminSections = window.AdminSections || {};
     });
   }
 
+  /** 配额策略卡:说明按空间 quotaBytes 计,80% 预警;近配额空间来自
+   *  adminOverview().nearQuota(服务端按 ratio 降序),点击直接打开该空间的成员抽屉。 */
+  function quotaCard(nearQuota, unavailable) {
+    if (unavailable) {
+      return UI.card({
+        id: 'admin-quota-policy', title: '配额策略', icon: 'pie-chart-2-line',
+        note: '按空间设置配额(quotaBytes);用量达到 80% 时进入预警。配额只提示,不拦截上传。',
+        body: UI.banner({ kind: 'warn', icon: 'alert-line', sm: true, text: '近配额数据暂不可用,请稍后刷新。' }),
+      });
+    }
+    const rows = (nearQuota || []).map((p) => {
+      const used = Number(p.storageBytes) || 0;
+      const quota = Number(p.quotaBytes) || 0;
+      const pct = Number(p.percent) || (quota > 0 ? Math.round(used / quota * 100) : 0);
+      return '<div class="admin-quota-row clickable" role="button" tabindex="0"' +
+        ' data-pid="' + UI.esc(p.id) + '" data-name="' + UI.esc(p.name) + '"' +
+        ' title="打开「' + UI.esc(p.name) + '」的成员管理">' +
+        '<div class="admin-quota-main">' +
+          '<div class="admin-quota-name">' + UI.esc(p.name) + '</div>' +
+          '<div class="admin-quota-meta">' + UI.esc(UI.fmtSize(used) + ' / ' + UI.fmtSize(quota) +
+            ' · ' + pct + '%') + '</div>' +
+          '<div class="admin-quota-bar' + (pct >= 90 ? ' danger' : '') + '">' +
+            '<i style="width:' + Math.max(0, Math.min(100, pct)) + '%"></i></div>' +
+        '</div>' +
+        '<span class="muted small">管理成员</span>' +
+        '</div>';
+    }).join('');
+    return UI.card({
+      id: 'admin-quota-policy', title: '配额策略', icon: 'pie-chart-2-line', between: true,
+      note: '按空间设置配额(quotaBytes);用量达到 80% 时进入预警。配额只提示,不拦截上传。',
+      body: rows || UI.emptyHtml({
+        icon: 'pie-chart-line', title: '暂无接近配额的空间',
+        desc: '任意协作空间用量达到配额的 80% 后会出现在这里', sm: true,
+      }),
+    });
+  }
+
   window.AdminSections.storage = function (ctx) {
     const el = ctx.el;
 
     function load() {
-      return UI.loadInto(el, () => api(Endpoints.adminStorage()), { render: storeHtml });
+      return UI.loadInto(el, () => Promise.all([
+        api(Endpoints.adminStorage()),
+        // 近配额是增强信息:总览接口失败不应让整张存储卡变成错误态
+        api(Endpoints.adminOverview()).catch(() => null),
+      ]), {
+        loadingHtml: UI.skeleton('cards', 2),
+        render: ([s, overview]) => {
+          const near = overview && Array.isArray(overview.nearQuota) ? overview.nearQuota : null;
+          return storeHtml(s) + quotaCard(near, near === null);
+        },
+      });
     }
 
     el.addEventListener('click', async (e) => {
+      const quotaRow = e.target.closest('.admin-quota-row');
+      if (quotaRow) {
+        const drawer = window.AdminSections && window.AdminSections.memberDrawer;
+        if (typeof drawer === 'function') {
+          drawer({ id: quotaRow.dataset.pid, name: quotaRow.dataset.name }, load);
+        } else {
+          UI.toast('成员抽屉尚未加载,请刷新页面重试', 'warning');
+        }
+        return;
+      }
       if (e.target.closest('#btn-cleanup')) {
         // 先 dry-run 预览:告诉管理员"将删掉什么、多少字节",再让他确认。
         // 原来是一句话弹窗直接删 —— 破坏性操作不该让人在看不到范围的情况下点确定。
@@ -134,6 +191,14 @@ window.AdminSections = window.AdminSections || {};
           await load();
         } catch (err) { UI.err(err); }
       }
+    });
+
+    // 配额行是 role=button,键盘 Enter/空格与鼠标点击同一条路径
+    el.addEventListener('keydown', (e) => {
+      const row = e.target.closest('.admin-quota-row');
+      if (!row || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      row.click();
     });
 
     return { key: 'storage', load };

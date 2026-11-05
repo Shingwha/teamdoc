@@ -1,7 +1,7 @@
-// app.js — 壳(侧栏 240px:搜索 / 项目树 / 用户卡片)+ 登录视图 + 路由入口
+// app.js — 壳(40px 顶栏 + 左栏 + 单一内容面)+ 登录视图 + 路由入口
 //   路由的文法(解析/串构造/模块表)在 route.js,界面怎么被挂出来在 scopes.js ——
 //   本文件只做三件事:拿当前 hash、把路由事实交给作用域链、处理"不渲染任何东西"的分支
-//   (登录页 / 重定向)。
+//   (登录页 / 重定向),以及壳自身的空间切换、命令面板入口与用户菜单。
 (function () {
   'use strict';
 
@@ -11,16 +11,22 @@
   const App = {
     user: null,       // 当前登录用户 {id,email,name,isAdmin,avatarColor}
     auth: null,       // /api/auth/me 的 auth 段 {via,scopes}
+    spaces: null,     // 可见空间列表缓存(壳与切换器共用;数据本身仍由各页自己取)
+    spacePid: null,   // 当前空间 id(路由里的 pid,或 #/ 解析出的记忆空间)
+    space: null,      // 当前空间对象(能取到时)
     // 离开守卫:视图在"有未保存内容"时拦下路由切换。**机制在此,策略由视图给** ——
     // 注册的 fn(target) 返回 Promise<boolean>,false = 不许离开。同时只有一个
     // (同一时刻只有一个编辑器视图活着),所以用单槽而不是数组。
     leaveGuard: null,
     onLeaveGuard(fn) { this.leaveGuard = fn; },
     clearLeaveGuard() { this.leaveGuard = null; },
-    // 路由串生成点(实现在 route.js:'#/p/…' 的唯一构造处,视图不手拼路由串)
-    route: { project: Route.project },
+    // 路由串生成点(实现在 route.js:各命名空间的唯一构造处,视图不手拼路由串)
+    route: { project: Route.project, settings: Route.settings, admin: Route.admin },
   };
   window.App = App;
+
+  const LAST_SPACE_KEY = 'td:last-space';
+  const VIEWED_KEY = 'td:viewed';
 
   // ---------- 壳 ----------
   function showShell() {
@@ -32,163 +38,117 @@
     document.getElementById('login-root').hidden = false;
   }
 
-  function setupShell() {
+  /** 当前空间 id:路由里的 pid 优先,其次是 #/ 解析/记忆出来的空间 */
+  App.currentSpaceId = function () {
+    const cur = Route.current();
+    if (cur && cur.pid) return cur.pid;
+    return App.spacePid || null;
+  };
+
+  /** 记忆并激活一个空间(不负责取项目对象;调用方拿到后再传一次) */
+  App.setSpace = function (pid, proj) {
+    pid = UI.idOf(pid);
+    if (!pid) return;
+    App.spacePid = pid;
+    UI.pref.set(LAST_SPACE_KEY, pid);
+    if (proj) App.space = proj;
+    else if (App.spaces) App.space = App.spaces.find((p) => p.id === pid) || App.space;
+    renderSideNav(pid);
+    syncSpaceChrome();
+    markSidebarActive();
+  };
+
+  /** 空间列表(壳/切换器/首页共用;失败不抛给壳) */
+  App.loadSpaces = async function (force) {
+    if (App.spaces && !force) return App.spaces;
+    App.spaces = (await api(Endpoints.projects())) || [];
+    syncSpaceChrome();
+    return App.spaces;
+  };
+
+  /** 账号资料改动后同步壳上的头像/菜单(App.user 是同一份事实) */
+  App.syncUser = function () {
     const u = App.user;
-    if (!u) return;
-    const name = u.name || u.email || '?';
-    const sideUser = document.getElementById('side-user');
-    sideUser.innerHTML =
-      UI.avatar({ name: name, seed: u.id, color: u.avatarColor, size: 32 }) +
-      '<span class="side-user-name side-label">' + UI.esc(name) + '</span>' +
-      // 菜单向上弹出,故用上向 chevron 作指示(原 more-unfold-line 在 Remix Icon 4.5 中不存在,一直不显示)
-      '<i class="ri-arrow-up-s-line"></i>';
-    sideUser.title = name + '(' + (u.email || '') + ')';
-    document.getElementById('side-admin').hidden = !u.isAdmin;
-    loadSidebarProjects();
-  }
-
-  // ---------- 侧栏:项目树(可展开节点;子项数据来自 Route.NAV) ----------
-  let sidebarProjects = null; // null=未加载;否则为 /api/projects 的最近结果(个人项目已在服务端置顶)
-  // 展开状态的唯一真相:仅由用户点击行、一次性种子(刷新/深链)、新建项目三处写入;
-  // 路由变化只影响高亮,绝不动展开态——这是"离开项目页不收回"的根本保证
-  const treeExpanded = new Map(); // projectId → bool
-  let treeSeeded = false;
-  let treeScrolledTo = null;      // 上次因路由滚动过的项目(避免每次导航都滚动侧栏)
-
-  async function loadSidebarProjects() {
-    const box = document.getElementById('side-projects');
-    try {
-      sidebarProjects = (await api(Endpoints.projects())) || [];
-      renderProjectTree();
-    } catch (e) {
-      box.innerHTML = '<span class="side-empty">加载失败</span>';
+    const btn = document.getElementById('btn-user');
+    if (u && btn) {
+      const name = u.name || u.email || '?';
+      btn.innerHTML = UI.avatar({ name: name, seed: u.id, color: u.avatarColor, size: 28 });
+      btn.title = name + '(' + (u.email || '') + ')';
     }
-  }
-  App.refreshSidebar = loadSidebarProjects;
+    syncSpaceChrome();
+  };
 
-  /** 重绘项目树:展开态纯读 treeExpanded;路由只决定节点弱化高亮与子项 active。
-      结构骨架由 UI.tree 产出(.tree-node/.tree-row/.tree-caret/.tree-children),
-      侧栏变体类(.side-item/.side-proj/.side-tree-children)挂在行与子项上(样式见 app.css)。
-      **只在数据/展开态变化时调用** —— 路由切换只动 class(见 markSidebarActive) */
-  function renderProjectTree() {
-    if (!sidebarProjects) return;
-    const box = document.getElementById('side-projects');
-    if (!sidebarProjects.length) {
-      box.innerHTML = '<span class="side-empty">暂无项目</span>';
-      return;
-    }
-    const { curPid, curTab } = sidebarActive();
-    // 一次性种子:刷新/深链直接进入项目页时默认展开该项目;此后展开态完全由用户接管
-    if (!treeSeeded) {
-      treeSeeded = true;
-      if (curPid) treeExpanded.set(curPid, true);
-    }
-    box.innerHTML = UI.tree({
-      nodes: sidebarProjects,
-      // 子项是模块导航链接而非树行,交给 childrenHtml 渲染;kids 恒非空 → caret 恒可展开
-      children: (p) => Route.NAV.filter((n) => n.visible(p)),
-      expanded: (p) => treeExpanded.get(p.id) === true,
-      rowCls: (p) => 'side-item side-proj' + (p.id === curPid ? ' current' : ''),
-      rowAttrs: (p) => 'data-pid="' + UI.esc(p.id) + '" title="' + UI.esc(p.name) + '"',
-      // caret 之外的内容:折叠图标栏态替身头像 + 项目名 + 个人徽章
-      rowInner: (p) =>
-        // 折叠图标栏态的替身:首字圆形头像(宽屏展开时隐藏;项目色已下线,统一 primary 固定色)
-        '<span class="side-proj-avatar">' + UI.avatar({
-          name: p.name, seed: p.id, size: 'sm', color: 'var(--md-primary)',
-        }) + '</span>' +
-        '<span class="side-label side-proj-name">' + UI.esc(p.name) + '</span>' +
-        (p.isPersonal ? '<span class="badge xs side-label">个人</span>' : ''),
-      // data-pid/data-tab 是原地高亮(不重绘)的命中依据
-      childrenHtml: (p) =>
-        '<div class="side-tree-children">' + Route.NAV
-          .filter((n) => n.visible(p))
-          .map((n) =>
-            '<a class="side-item side-subitem' + (p.id === curPid && curTab === n.key ? ' active' : '') + '"' +
-            ' data-pid="' + UI.esc(p.id) + '" data-tab="' + UI.esc(n.key) + '"' +
-            ' href="' + App.route.project(p.id, n.key) + '" title="' + UI.esc(n.label) + '">' +
-            UI.icon(n.icon) + '<span class="side-label">' + UI.esc(n.label) + '</span></a>'
-          ).join('') + '</div>',
-    });
-    scrollToCurrentProject(curPid, box);
+  function syncSpaceChrome() {
+    const nameEl = document.getElementById('space-name');
+    const dotEl = document.getElementById('space-dot');
+    if (!nameEl) return;
+    let proj = App.space;
+    if (!proj && App.spacePid && App.spaces) proj = App.spaces.find((p) => p.id === App.spacePid);
+    nameEl.textContent = proj ? proj.name : (App.spacePid ? '空间' : '选择空间');
+    const color = (proj && proj.color) || '';
+    dotEl.style.background = color || 'var(--md-primary)';
   }
 
-  /** 当前路由落在哪个项目/模块(路由里的 id 过一遍形状:形状不对 → null,坏链接不高亮) */
-  function sidebarActive() {
-    const segs = currentSegs();
-    return {
-      curPid: segs[0] === 'p' ? UI.idOf(segs[1]) : null,
-      curTab: segs[0] === 'p' ? (segs[2] || null) : null,
-    };
+  // ---------- 左栏:当前空间导航 + 文档树槽位 + 云空间/回收站 ----------
+  // 文档树不由壳渲染:文档模块在自己的 render 里写进 #side-doc-tree,离开即清空。
+  // 这里只负责导航与空间上下文 —— 单一树、单一来源。
+  let navPid = null;
+
+  function navLink(key, label, icon, href, extra) {
+    return '<a class="side-item" data-route="' + key + '" href="' + href + '"' +
+      (extra || '') + '>' + UI.icon(icon) + '<span class="side-label">' + UI.esc(label) + '</span></a>';
+  }
+  function navDisabled(key, label, icon, reason) {
+    return '<span class="side-item disabled" data-route="' + key + '" title="' + UI.esc(reason) + '">' +
+      UI.icon(icon) + '<span class="side-label">' + UI.esc(label) + '</span></span>';
   }
 
-  /** 侧栏滚动只在"当前项目变了"时发生:每次路由都滚一下,侧栏会自己动起来 */
-  function scrollToCurrentProject(curPid, box) {
-    if (!curPid || treeScrolledTo === curPid) return;
-    treeScrolledTo = curPid;
-    const escaped = window.CSS && CSS.escape ? CSS.escape(curPid) : curPid;
-    const node = box.querySelector('.side-proj[data-pid="' + escaped + '"]');
-    if (node) node.scrollIntoView({ block: 'nearest' });
+  function renderSideNav(pid) {
+    if (navPid === pid) return;
+    navPid = pid;
+    const nav = document.getElementById('side-nav');
+    const foot = document.getElementById('side-foot');
+    if (!nav || !foot) return;
+
+    nav.innerHTML = navLink('home', '首页', 'home-5-line', '#/') +
+      (pid
+        ? navLink('recent', '最近', 'history-line', App.route.project(pid, 'recent')) +
+          navLink('favorites', '收藏', 'star-line', App.route.project(pid, 'favorites'))
+        : navDisabled('recent', '最近', 'history-line', '进入一个空间后可用') +
+          navDisabled('favorites', '收藏', 'star-line', '进入一个空间后可用'));
+
+    foot.innerHTML = pid
+      ? navLink('files', '云空间', 'folder-line', App.route.project(pid, 'files')) +
+        navLink('trash', '回收站', 'delete-bin-line', App.route.project(pid, 'trash'))
+      : navDisabled('files', '云空间', 'folder-line', '进入一个空间后可用') +
+        navDisabled('trash', '回收站', 'delete-bin-line', '进入一个空间后可用');
   }
 
-  // 节点行点击 = 纯展开/收起(整行,不导航;进入项目只能点子项);这是展开态的日常唯一写入点
-  document.getElementById('side-projects').addEventListener('click', (e) => {
-    const row = e.target.closest('.side-proj');
-    if (!row) return;
-    const pid = UI.idOf(row.dataset.pid);
-    const open = treeExpanded.get(pid) !== true;
-    treeExpanded.set(pid, open);
-    setTreeNodeOpen(row, open);
-  });
-
-  /** 原地展开/收起一个树节点:结构与 UI.tree 产出的一致(.tree-caret + .tree-children)。
-      整树重绘会丢 hover/焦点,树越大越明显 —— 折叠只是隐藏子层,不该重建节点 */
-  function setTreeNodeOpen(row, open) {
-    const node = row.closest('.tree-node') || row.parentElement;
-    const caret = node.querySelector('.tree-caret');
-    const kids = node.querySelector('.tree-children');
-    if (caret && !caret.classList.contains('leaf')) caret.classList.toggle('open', open);
-    if (kids) kids.hidden = !open;
-  }
-
-  // 新建项目后跳转前显式展开,保证落地页子项可见(见 projects.js)
-  App.expandProject = (pid) => { treeExpanded.set(UI.idOf(pid), true); renderProjectTree(); };
-
-  /** 全局项(项目列表 / 发现 / 管理后台 / 个人设置)与项目子项的高亮。
-      **只动 class**:路由切换重绘侧栏会让整个项目树重建一次(旧代码就是),那是"整页闪"的一部分 */
+  /** 左栏高亮:只动 class,不重绘(路由切换重绘会丢节点身份) */
   function markSidebarActive() {
-    const { curPid, curTab } = sidebarActive();
-    let sel = null;
-    // #/ 即项目列表页(segs 为空),它是"项目"这一项的归属路由
+    const cur = Route.current();
     const segs = currentSegs();
-    if (segs.length === 0) sel = '[data-route="projects"]';
-    else if (segs[0] === 'discover') sel = '[data-route="discover"]';
-    else if (segs[0] === 'admin') sel = '[data-route="admin"]';
-    else if (segs[0] === 'settings') sel = '[data-route="settings"]';
-    document.querySelectorAll('#sidebar .side-item.active').forEach((a) => {
-      if (!sel || !a.matches(sel)) a.classList.remove('active');
-    });
-    if (sel) {
-      const el = document.querySelector('#sidebar ' + sel);
-      if (el) el.classList.add('active');
-    }
-    const box = document.getElementById('side-projects');
-    box.querySelectorAll('.side-proj').forEach((row) => {
-      row.classList.toggle('current', row.dataset.pid === curPid);
-    });
-    box.querySelectorAll('.side-subitem').forEach((a) => {
-      a.classList.toggle('active', a.dataset.pid === curPid && a.dataset.tab === curTab);
-    });
-    scrollToCurrentProject(curPid, box);
+    let active = '';
+    if (!segs.length) active = 'home';
+    else if (segs[0] === 'p' && cur && cur.tab) active = cur.tab;
+    document.querySelectorAll('#sidebar .side-item.active').forEach((a) => a.classList.remove('active'));
+    if (!active) return;
+    const el = document.querySelector('#sidebar .side-item[data-route="' + active + '"]');
+    if (el) el.classList.add('active');
   }
 
-  // ---------- 用户头像下拉菜单(个人设置 / 外观 / 退出登录) ----------
-  // ---------- 外观面板:主题三档 + 种子色圆点(挂在用户菜单里) ----------
+  App.switchSpace = function (pid) {
+    pid = UI.idOf(pid);
+    if (!pid) return;
+    App.setSpace(pid);
+    location.hash = App.route.project(pid, 'home');
+  };
+
+  // ---------- 用户菜单 ----------
   function buildAppearancePanel() {
     const wrap = document.createElement('div');
     wrap.className = 'menu-header';
     wrap.innerHTML = '<div class="small muted mb-2 fw-semi">外观</div>';
-
-    // 浅色 / 深色 / 跟随系统
     const segEl = document.createElement('div');
     segEl.innerHTML = UI.seg({
       active: Theme.getMode(),
@@ -197,8 +157,6 @@
     const seg = segEl.firstElementChild;
     UI.segWire(seg, (key) => Theme.setMode(key));
     wrap.appendChild(seg);
-
-    // 种子色圆点选择器(底色是数据 —— 主题色值来自 Theme.COLORS,故仍内联注入)
     const dots = document.createElement('div');
     dots.className = 'color-dots mt-3';
     Theme.COLORS.forEach((c) => {
@@ -218,12 +176,27 @@
     return wrap;
   }
 
-  function setupUserMenu() {
-    const trigger = document.getElementById('side-user');
-    UI.dropdownMenu(trigger, () => [
-      {
+  function setupTopbar() {
+    if (setupTopbar.wired) return;
+    setupTopbar.wired = true;
+    spaceSwitchMenu = UI.dropdownMenu(document.getElementById('space-switch'),
+      () => [{ custom: buildSpaceSwitcher() }], { align: 'start', menuCls: 'space-switch-menu' });
+    // 首页无空间态的「发现空间」入口:打开切换器并直接落到发现页签
+    App.openSpaceSwitcher = function (tab) {
+      if (tab) spaceSwitchTab = tab;
+      if (spaceSwitchMenu) spaceSwitchMenu.open();
+    };
+    document.getElementById('cmd-open').addEventListener('click', () => {
+      if (window.Palette) Palette.open();
+    });
+    UI.dropdownMenu(document.getElementById('btn-notify'),
+      () => [{ custom: buildNotifyPanel() }], { align: 'end', menuCls: 'notify-menu' });
+    document.getElementById('btn-settings').setAttribute('href', App.route.settings('account'));
+
+    UI.dropdownMenu(document.getElementById('btn-user'), () => {
+      const u = App.user || {};
+      const items = [{
         custom: (() => {
-          const u = App.user || {};
           const el = document.createElement('div');
           el.className = 'menu-header';
           el.innerHTML =
@@ -233,30 +206,384 @@
             '<div class="small muted truncate">' + UI.esc(u.email || '') + '</div></div></div>';
           return el;
         })(),
-      },
-      { divider: true },
-      { icon: 'settings-3-line', label: '个人设置', onClick: () => { location.hash = '#/settings'; } },
-      { custom: buildAppearancePanel() },
-      { divider: true },
-      { icon: 'logout-box-line', label: '退出登录', danger: true, onClick: doLogout },
-    ], { direction: 'up' });
+      }, { divider: true },
+      { icon: 'settings-3-line', label: '个人设置', onClick: () => { location.hash = App.route.settings('account'); } }];
+      if (u.isAdmin) {
+        items.push({ icon: 'shield-user-line', label: '管理后台', onClick: () => { location.hash = App.route.admin('overview'); } });
+      }
+      items.push({ custom: buildAppearancePanel() }, { divider: true });
+      items.push({ icon: 'logout-box-line', label: '退出登录', danger: true, onClick: doLogout });
+      return items;
+    }, { direction: 'down', align: 'end' });
+
+    setupNarrowSidebar();
+  }
+
+  // ---------- 空间切换器(自定义浮层:我的空间 / 发现空间) ----------
+  let spaceSwitchMenu = null;
+  let spaceSwitchTab = 'mine';
+
+  function canManageSpace(p) {
+    return !!p && ((App.user && App.user.isAdmin) || p.myRole === 'OWNER' || p.myRole === 'ADMIN');
+  }
+  function anyManageableSpace() {
+    return !!(App.user && App.user.isAdmin) ||
+      (App.spaces || []).some((p) => p.myRole === 'OWNER' || p.myRole === 'ADMIN');
+  }
+
+  function spaceMenuRow(p) {
+    const current = p.id === App.spacePid;
+    return '<div class="ss-space-row' + (current ? ' current' : '') + '" role="button" tabindex="0"' +
+      ' data-pid="' + UI.esc(p.id) + '">' +
+      '<span class="space-dot sm" style="background:' + UI.esc(p.color || 'var(--md-primary)') + '"></span>' +
+      '<span class="ss-space-main">' +
+        '<span class="ss-space-name">' + UI.esc(p.name) + '</span>' +
+        (p.isPersonal ? UI.badge({ text: '个人', cls: 'xs' })
+          : (p.myRole ? UI.badge({ text: UI.roleLabel(p.myRole), cls: 'xs' }) : '')) +
+      '</span>' +
+      (current ? UI.icon('check-line', 'ss-current') : '') +
+      // 逐空间设置入口:只有能管理这个空间的人才看得到
+      (canManageSpace(p) ? UI.iconBtn({ icon: 'more-fill', title: '空间设置', size: 'sm', cls: 'ss-more' }) : '') +
+      '</div>';
+  }
+
+  function discoverMenuRow(p) {
+    return '<div class="ss-disc-row" data-pid="' + UI.esc(p.id) + '">' +
+      '<span class="space-dot sm" style="background:' + UI.esc(p.color || 'var(--md-primary)') + '"></span>' +
+      '<span class="ss-space-main">' +
+        '<span class="ss-space-name">' + UI.esc(p.name) + '</span>' +
+        '<span class="ss-disc-desc">' + UI.esc(p.description || '暂无描述') + '</span>' +
+      '</span>' +
+      (p.isMember
+        ? '<button type="button" class="btn btn-text btn-sm ss-open">打开</button>'
+        : '<button type="button" class="btn btn-tonal btn-sm ss-join">加入</button>') +
+      '</div>';
+  }
+
+  /** 每次打开都重建:空间列表与公开空间都以点击这一刻的事实为准 */
+  function buildSpaceSwitcher() {
+    const panel = document.createElement('div');
+    panel.className = 'space-switcher';
+    panel.innerHTML =
+      '<div class="ss-tabs" role="tablist">' +
+      '<button type="button" class="ss-tab" role="tab" data-ss-tab="mine">我的空间</button>' +
+      '<button type="button" class="ss-tab" role="tab" data-ss-tab="discover">发现空间</button>' +
+      '</div>' +
+      '<div class="ss-body" id="ss-body"></div>' +
+      '<div class="ss-foot" id="ss-foot"></div>';
+    const body = panel.querySelector('#ss-body');
+    const foot = panel.querySelector('#ss-foot');
+    let active = spaceSwitchTab;
+    let discover = null;      // {loading,error,items}
+    let loadingSpaces = false;
+
+    function alive() { return document.body.contains(panel); }
+    function closeMenu() { UI.closeOpenMenu(); }
+
+    function paintTabs() {
+      panel.querySelectorAll('[data-ss-tab]').forEach((b) => {
+        const on = b.dataset.ssTab === active;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+    }
+
+    function paintFoot() {
+      foot.innerHTML =
+        UI.btn({ id: 'ss-create', label: '创建空间', icon: 'add-line', kind: 'text', size: 'sm' }) +
+        (anyManageableSpace()
+          ? UI.btn({ id: 'ss-manage', label: '管理空间', icon: 'layout-grid-line', kind: 'text', size: 'sm' })
+          : '');
+    }
+
+    function paintBody() {
+      if (active === 'mine') {
+        const spaces = App.spaces;
+        if (!spaces) {
+          body.innerHTML = UI.loadingRow('加载空间…');
+          if (!loadingSpaces) {
+            loadingSpaces = true;
+            App.loadSpaces().then(() => {
+              loadingSpaces = false;
+              if (alive() && active === 'mine') paintBody();
+            }).catch((e) => {
+              loadingSpaces = false;
+              if (alive() && active === 'mine') body.innerHTML = UI.error(e, { sm: true });
+            });
+          }
+          paintFoot();
+          return;
+        }
+        body.innerHTML = spaces.length
+          ? spaces.map(spaceMenuRow).join('')
+          : UI.empty({ sm: true, icon: 'folder-open-line', title: '还没有空间', desc: '创建空间开始协作' }).outerHTML;
+        paintFoot();
+        return;
+      }
+      if (!discover || discover.loading) {
+        body.innerHTML = UI.loadingRow('加载公开空间…');
+      } else if (discover.error) {
+        body.innerHTML = UI.error(discover.error, { sm: true });
+      } else {
+        const list = discover.items || [];
+        body.innerHTML = list.length
+          ? list.map(discoverMenuRow).join('')
+          : UI.empty({
+            sm: true, icon: 'compass-3-line', title: '还没有公开空间',
+            desc: '空间管理员把空间公开后,同事就能在这里发现并加入',
+          }).outerHTML;
+      }
+      paintFoot();
+    }
+
+    function loadDiscover() {
+      discover = { loading: true, error: null, items: [] };
+      paintBody();
+      api(Endpoints.discover()).then((items) => {
+        discover = { loading: false, error: null, items: items || [] };
+        if (alive() && active === 'discover') paintBody();
+      }).catch((e) => {
+        discover = { loading: false, error: e, items: [] };
+        if (alive() && active === 'discover') paintBody();
+      });
+    }
+
+    panel.addEventListener('click', (e) => {
+      const tab = e.target.closest('[data-ss-tab]');
+      if (tab) {
+        active = tab.dataset.ssTab === 'discover' ? 'discover' : 'mine';
+        spaceSwitchTab = active;
+        paintTabs();
+        if (active === 'discover' && !discover) loadDiscover();
+        else paintBody();
+        return;
+      }
+      if (e.target.closest('#ss-create')) {
+        closeMenu();
+        if (window.SpaceWizard) SpaceWizard.open();
+        return;
+      }
+      if (e.target.closest('#ss-manage')) {
+        closeMenu();
+        location.hash = '#/projects';
+        return;
+      }
+      const more = e.target.closest('.ss-more');
+      if (more) {
+        const row = more.closest('.ss-space-row');
+        const proj = (App.spaces || []).find((x) => x.id === row.dataset.pid);
+        closeMenu();
+        if (proj && window.SpaceSettings) SpaceSettings.open(proj, proj.id, 'overview');
+        return;
+      }
+      const spaceRow = e.target.closest('.ss-space-row');
+      if (spaceRow) {
+        closeMenu();
+        App.switchSpace(spaceRow.dataset.pid);
+        return;
+      }
+      const openBtn = e.target.closest('.ss-open');
+      if (openBtn) {
+        closeMenu();
+        location.hash = App.route.project(openBtn.closest('.ss-disc-row').dataset.pid, 'home');
+        return;
+      }
+      const joinBtn = e.target.closest('.ss-join');
+      if (joinBtn) {
+        const p = ((discover && discover.items) || [])
+          .find((x) => x.id === joinBtn.closest('.ss-disc-row').dataset.pid);
+        closeMenu();
+        if (p && window.ProjectsAPI) ProjectsAPI.joinPrompt(p.id, p.name, p.joinRole);
+      }
+    });
+
+    paintTabs();
+    paintBody();
+    if (active === 'discover') loadDiscover();
+    return panel;
+  }
+
+  // ---------- 通知 ----------
+  /** 未读红点:壳启动时与已读操作后各刷一次;接口失败只收起点,不打扰用户 */
+  function refreshNotifyBadge() {
+    const btn = document.getElementById('btn-notify');
+    if (!btn || !App.user) return;
+    api(Endpoints.notifications()).then((r) => {
+      const unread = (r && r.unread) || 0;
+      btn.classList.toggle('has-unread', unread > 0);
+      btn.title = unread > 0 ? '通知(' + unread + ' 条未读)' : '通知';
+    }).catch(() => {
+      btn.classList.remove('has-unread');
+    });
+  }
+
+  function buildNotifyPanel() {
+    const panel = document.createElement('div');
+    panel.className = 'notify-panel';
+    panel.innerHTML =
+      '<div class="notify-head"><span class="notify-title">通知</span></div>' +
+      '<div class="notify-list" id="notify-list">' + UI.loadingRow('加载通知…') + '</div>' +
+      '<div class="notify-foot">' +
+      '<button type="button" class="btn btn-text btn-sm" id="notify-read-all">全部已读</button></div>';
+    const list = panel.querySelector('#notify-list');
+    const readAll = panel.querySelector('#notify-read-all');
+    let items = [];
+
+    function setBadge(unread) {
+      const btn = document.getElementById('btn-notify');
+      if (!btn) return;
+      btn.classList.toggle('has-unread', unread > 0);
+      btn.title = unread > 0 ? '通知(' + unread + ' 条未读)' : '通知';
+    }
+
+    function paint() {
+      const unread = items.filter((x) => !x.readAt).length;
+      readAll.disabled = unread === 0;
+      if (!items.length) {
+        list.innerHTML = '';
+        list.appendChild(UI.empty({ sm: true, icon: 'notification-3-line', title: '暂无通知' }));
+        return;
+      }
+      list.innerHTML = items.map((n) =>
+        '<button type="button" class="notify-item' + (n.readAt ? '' : ' unread') + '" data-nid="' + UI.esc(n.id) + '">' +
+        '<span class="notify-dot"></span>' +
+        '<span class="notify-main">' +
+        '<span class="notify-item-title">' + UI.esc(n.title) + '</span>' +
+        (n.body ? '<span class="notify-body">' + UI.esc(n.body) + '</span>' : '') +
+        '<span class="notify-time">' + UI.esc(UI.fmtWhen(n.createdAt)) + '</span>' +
+        '</span></button>').join('');
+    }
+
+    api(Endpoints.notifications()).then((r) => {
+      items = (r && r.items) || [];
+      setBadge((r && r.unread) || items.filter((x) => !x.readAt).length);
+      paint();
+    }).catch((e) => {
+      list.innerHTML = UI.error(e, { sm: true });
+      readAll.disabled = true;
+      setBadge(0);
+    });
+
+    list.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.notify-item');
+      if (!btn) return;
+      const n = items.find((x) => x.id === btn.dataset.nid);
+      if (!n) return;
+      if (!n.readAt) {
+        try {
+          await api(Endpoints.notificationsRead(), { method: 'POST', body: { ids: [n.id] } });
+        } catch (err) { UI.err(err); return; }
+        n.readAt = new Date().toISOString();
+        setBadge(items.filter((x) => !x.readAt).length);
+        paint();
+      }
+      UI.closeOpenMenu();
+      if (n.link && n.link.charAt(0) === '#') location.hash = n.link;
+      else if (n.link) location.assign(n.link);
+    });
+
+    readAll.addEventListener('click', async () => {
+      try {
+        await api(Endpoints.notificationsReadAll(), { method: 'POST', body: {} });
+      } catch (err) { UI.err(err); return; }
+      items.forEach((x) => { if (!x.readAt) x.readAt = new Date().toISOString(); });
+      setBadge(0);
+      paint();
+      UI.toast('已全部标记为已读', 'success');
+    });
+
+    return panel;
+  }
+
+  // 窄屏左栏是抽屉:顶栏的菜单钮打开它,导航后自动收起
+  function setupNarrowSidebar() {
+    const shell = document.getElementById('shell');
+    const collapseBtn = document.getElementById('btn-side');
+    const sidePanel = UI.dualPanel({
+      el: shell,
+      openCls: 'side-open',
+      prefKey: 'td:side-open',
+      onChange: (p) => { if (collapseBtn) collapseBtn.title = p.isOpen() ? '收起导航' : '打开导航'; },
+    });
+    if (collapseBtn) collapseBtn.addEventListener('click', () => sidePanel.toggle());
+    document.getElementById('side-scrim').addEventListener('click', sidePanel.close);
+    document.getElementById('sidebar').addEventListener('click', (e) => {
+      if (sidePanel.isNarrow() && e.target.closest('.side-item')) sidePanel.close();
+    });
+    // 宽屏折叠按钮在左栏底部;窄屏收起由遮罩与导航完成
+    const collapseWide = document.getElementById('side-collapse');
+    if (collapseWide) collapseWide.addEventListener('click', () => sidePanel.toggle());
+    App.closeNavDrawer = function () { if (sidePanel.isNarrow()) sidePanel.close(); };
+    App.toggleSidebar = sidePanel.toggle;
   }
 
   async function doLogout() {
     try { await api(Endpoints.authLogout(), { method: 'POST' }); } catch (e) { /* 忽略 */ }
     App.user = null;
     App.auth = null;
+    App.spaces = null;
+    App.space = null;
+    App.spacePid = null;
+    navPid = null;
+    setupShell._uid = null;
     if (location.hash === '#/login') route();
     else location.hash = '#/login';
   }
 
+  // ---------- 管理后台动态加载(普通用户永不请求这些脚本) ----------
+  const ADMIN_SCRIPTS = [
+    '/js/views/admin/overview.js',
+    '/js/views/admin/storage.js',
+    '/js/views/admin/backup.js',
+    '/js/views/admin/projects.js',
+    '/js/views/admin/users.js',
+    '/js/views/admin/security.js',
+    '/js/views/admin.js',
+  ];
+  let adminPromise = null;
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('管理模块加载失败:' + src));
+      document.body.appendChild(s);
+    });
+  }
+
+  App.loadAdmin = function () {
+    if (!App.user || !App.user.isAdmin) return Promise.resolve(false);
+    if (adminPromise) return adminPromise;
+    adminPromise = (async () => {
+      for (const src of ADMIN_SCRIPTS) await loadScript(src);
+      return true;
+    })().catch((e) => { adminPromise = null; throw e; });
+    return adminPromise;
+  };
+
+  // ---------- 最近浏览(本地记录) ----------
+  App.recordView = function (pid, docId, title) {
+    pid = UI.idOf(pid);
+    docId = UI.idOf(docId);
+    if (!pid || !docId) return;
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(VIEWED_KEY) || '[]') || []; } catch (e) { list = []; }
+    list = list.filter((x) => !(x.projectId === pid && x.id === docId));
+    list.unshift({ id: docId, projectId: pid, title: title || '文档', at: new Date().toISOString() });
+    try { localStorage.setItem(VIEWED_KEY, JSON.stringify(list.slice(0, 60))); } catch (e) { /* 配额满时放弃 */ }
+  };
+
+  App.viewed = function (pid) {
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(VIEWED_KEY) || '[]') || []; } catch (e) { list = []; }
+    return list.filter((x) => x.projectId === pid);
+  };
+
   // ---------- 路由 ----------
-  // 解析归 route.js(Route.parse/resolve),这里只做三件事:拿路由事实、把事实交给作用域
-  // 链、处理"不渲染任何东西"的分支(登录页 / 重定向)。
   function currentSegs() { return Route.parse(location.hash).segs; }
 
-  /** force = 丢掉现有作用域链整条重建(页面身份变了;只是数据变了该让那一层自己重取) */
-  let forceNext = false;   // 待兑现的强制重建:重定向会跨一次 _route,标记必须活到真正挂载那一次
+  let forceNext = false;
   function route(force) {
     forceNext = forceNext || !!force;
     Promise.resolve(_route()).catch((e) => {
@@ -264,11 +591,6 @@
       UI.err(e);
     });
   }
-  /**
-   * 页面数据变了、而链上某一层的**存在与否**跟着变了时用它。典型:刚加入一个项目 ——
-   * 项目层的错误态还在,而它的键(p/{pid})没变,不强制重建就永远停在"你还不是成员"。
-   * 只让那一层自己重取是不够的:错误态/权限位是**上游层**的数据。
-   */
   App.refresh = () => route(true);
 
   function hashOf(url) {
@@ -277,57 +599,84 @@
     return i < 0 ? '' : url.slice(i);
   }
 
-  /**
-   * 带守卫的 hashchange 入口(取代直接 route)。
-   *
-   * 守卫拒绝时必须把 hash 还原回去 —— 浏览器已经把地址改了,不还原的话地址栏与画面
-   * 会对不上。还原动作自己又会触发一次 hashchange,**那一次什么都不做**:我们从没渲染
-   * 新路由,旧作用域(连同用户没保存的正文)还好端端留在 DOM 里,再跑一遍 route() 会把
-   * 编辑器整个重建、未保存内容就没了。
-   *
-   * 用"还原目标 hash"而不是布尔标志来识别那一次:布尔标志一旦因为浏览器没派发事件而
-   * 卡住,会静默吞掉下一次真实导航(点了没反应);比对 hash 则会自愈。
-   */
   let restoredTo = null;
   async function guardedRoute(ev) {
     if (restoredTo !== null && location.hash === restoredTo) { restoredTo = null; return; }
     const fromHash = hashOf(ev && ev.oldURL);
-    // 去登录页不拦:登出与 401 失效有自己的语义,拦住会把用户卡在一个已失效的页面上
     if (!App.leaveGuard || location.hash.startsWith('#/login')) { route(); return; }
     let allow = true;
     try { allow = await App.leaveGuard(location.hash); }
-    catch (e) { allow = true; }   // 守卫自身出错不该把用户困死
+    catch (e) { allow = true; }
     if (allow) { route(); return; }
     restoredTo = fromHash || '#/';
     location.replace(restoredTo);
   }
 
+  async function ensureUser() {
+    if (App.user) return true;
+    try {
+      const me = await api(Endpoints.authMe());
+      App.user = me.user;
+      App.auth = me.auth || null;
+      setupShell();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function setupShell() {
+    if (!App.user) return;
+    // 同一页换账号(退出后登录 / 会话失效后重新登录):空间缓存属于上一个用户,
+    // 必须丢掉;记忆键(上次空间)保留,由新账号自己的可见列表校验
+    if (setupShell._uid !== App.user.id) {
+      setupShell._uid = App.user.id;
+      App.spaces = null;
+      App.space = null;
+      navPid = null;
+    }
+    setupTopbar();
+    App.syncUser();
+    renderSideNav(App.spacePid || UI.pref.get(LAST_SPACE_KEY, null));
+    App.loadSpaces().catch(() => { /* 空间列表失败不阻塞壳 */ });
+    refreshNotifyBadge();
+  }
+
+  function shellError(view, message) {
+    Scope.clear();
+    view.innerHTML = UI.error({ message: message, action: { label: '返回首页', id: 'boot-back' } });
+    const back = view.querySelector('#boot-back');
+    if (back) back.onclick = () => { location.hash = '#/'; };
+  }
+
   async function _route() {
     UI.closeOpenMenu();
-    // 模态框挂在 body 上,不属于任何作用域,路由切换不会自动清掉它们 ——
-    // 不关的话旧弹窗会盖在新页面上(且 Esc 只能关它)
     UI.closeAllModals();
     if (App.closeNavDrawer) App.closeNavDrawer();
     const view = document.getElementById('view');
-    const out = Route.resolve(location.hash);
 
-    if (out.login) { Scope.clear(); await renderLogin(); return; }
+    const pre = Route.parse(location.hash);
+    if (pre.segs[0] === 'login') { Scope.clear(); await renderLogin(); return; }
 
-    // 路由守卫:未登录一律跳 #/login
-    if (!App.user) {
-      try {
-        const me = await api(Endpoints.authMe());
-        App.user = me.user;
-        App.auth = me.auth || null;
-        setupShell();
-      } catch (e) {
-        if (location.hash !== '#/login') location.replace('#/login');
-        else { Scope.clear(); await renderLogin(); }
-        return;
-      }
+    if (!(await ensureUser())) {
+      if (location.hash !== '#/login') location.replace('#/login');
+      else { Scope.clear(); await renderLogin(); }
+      return;
     }
 
-    // 重定向在碰 DOM 之前返回:先清空页面再跳转,用户会看到一帧空白
+    // 管理后台:先过管理员闸,再按序加载独立的 admin 脚本;普通用户不会发起这些请求
+    if (pre.segs[0] === 'admin') {
+      if (!App.user.isAdmin) {
+        UI.toast('仅管理员可访问管理后台', 'warning');
+        location.replace('#/');
+        return;
+      }
+      try { await App.loadAdmin(); }
+      catch (e) { console.error(e); shellError(view, e.message); return; }
+    }
+
+    const out = Route.resolve(location.hash);
+
     if (out.redirect) {
       if (out.notice) UI.err(out.notice);
       location.replace(out.redirect);
@@ -335,27 +684,22 @@
     }
 
     Route.setCurrent(out.route);
-    // 记住项目内模块,再次进入项目时落在同一处(见 Route.resolve 的裸项目链接分支)
     if (out.route.tab) UI.pref.set('td:lastTab:' + out.route.pid, out.route.tab);
+    // 空间上下文:路由里带 pid 就切过去;'#/' 由 home 视图解析记忆空间后回填
+    if (out.route.pid) App.setSpace(out.route.pid);
+    else renderSideNav(App.spacePid);
     showShell();
     markSidebarActive();
-    if (out.route.segs[0] === 'search') {
-      const gs = document.getElementById('global-search');
-      if (gs) gs.value = out.route.query.get('q') || '';
-    }
-    // 作用域链:键没变的那几层原样留着(壳/项目/文档树),只有键变了的那一层重建。
-    // 强制重建标记在这里兑现 —— 重定向会跨一次 _route,提前清掉的话那次强制就丢了
     Scope.apply(view, out.spec, { hostClass: out.hostClass, force: forceNext });
     forceNext = false;
   }
 
-  // ---------- 登录视图(#/login,无壳;含初始化向导,§7.1) ----------
+  // ---------- 登录 / 初始化视图(#/login,无壳;含两步初始化向导) ----------
   async function renderLogin() {
     hideShell();
     const root = document.getElementById('login-root');
     root.innerHTML = '<div class="login-page"><div class="login-card">' + UI.loadingRow() + '</div></div>';
 
-    // 已登录直接进入系统
     try {
       const me = await api(Endpoints.authMe());
       if (me && me.user) {
@@ -367,7 +711,6 @@
       }
     } catch (e) { /* 未登录,继续渲染登录页 */ }
 
-    // 未初始化 → 初始化向导;已初始化 → 登录表单(§7.1 status)
     let status = { bootstrapped: true, dbReady: true };
     try { status = await api(Endpoints.authStatus()); }
     catch (e) { status = { bootstrapped: true, dbReady: false }; }
@@ -376,7 +719,6 @@
     else renderAuthForm(root, { status, mode: 'login', email: rememberedEmail() });
   }
 
-  // 记住邮箱:只在登录成功后才写入(见 renderLoginForm),避免把打错的邮箱也记住
   const REMEMBER_EMAIL_KEY = 'td:login-email';
   function rememberedEmail() { return UI.pref.get(REMEMBER_EMAIL_KEY, ''); }
 
@@ -385,16 +727,18 @@
       ? UI.banner({ kind: 'info', icon: 'database-2-line', cls: 'mb-4', text: '数据库未就绪,请稍后刷新重试' }) : '';
   }
 
-  /**
-   * 登录 / 初始化向导共用一张表单(两份骨架 ~90% 相同,差异全部走配置):
-   * mode: 'login'(记住邮箱 + remember 勾选)| 'bootstrap'(多一个姓名字段,
-   * 成功后多一句 toast;autocomplete 令牌按"创建新账号"语义给)。
-   */
+  function brandCard(inner, subtitle) {
+    return '<div class="login-page"><div class="login-card">' +
+      '<div class="login-brand">' +
+      '<span class="login-logo">' + UI.icon('file-text-line') + '</span>' +
+      '<span class="login-brand-name">TeamDoc</span></div>' +
+      '<div class="login-sub">' + UI.esc(subtitle || '小团队自部署文档与知识库') + '</div>' +
+      inner + '</div></div>';
+  }
+
   function renderAuthForm(root, { status, mode, email = '' }) {
     const isBootstrap = mode === 'bootstrap';
-    // 刻意用 type="text":type="email" 会启用浏览器的原生格式校验,而它比服务端严
-    // (如 11@.com 会被拦下),而后端只要求含 "@"。两边强度不一致会造出"管理后台能建、
-    // 登录页却登不进去"的账号。格式判定统一交给服务端,前端只管必填。
+    // 刻意用 type="text":浏览器原生格式校验比服务端严,格式判定统一交给服务端
     const emailField =
       '<div class="field"><label>邮箱</label>' +
       '<input type="text" class="input" name="email" required autocomplete="username" value="' + UI.esc(email) + '"></div>';
@@ -405,27 +749,25 @@
       ? '<div class="field"><label>姓名</label>' +
         '<input type="text" class="input" name="name" required maxlength="50" autocomplete="name"></div>'
       : '';
-    // 文案是"延长登录有效期"而非"记住密码":本地不存密码,靠更长的会话 cookie 实现。
-    // 写成"记住密码"会让用户以为密码落盘了,是误导
     const rememberField = isBootstrap
       ? ''
       : '<div class="field"><label class="check-row"><input type="checkbox" name="remember">' +
         '记住我(延长登录有效期)</label></div>';
 
-    root.innerHTML =
-      '<div class="login-page"><div class="login-card">' +
-      '<div class="login-brand">TeamDoc</div>' +
-      '<div class="login-sub">' + (isBootstrap ? '初始化:创建管理员账号' : '小团队自部署知识库') + '</div>' +
+    root.innerHTML = brandCard(
       dbWarning(status) +
+      // 初始化是"先到先得"的管理员注册窗口:站点一上线就能被抢注,提示必须显眼
+      (isBootstrap ? UI.banner({
+        kind: 'warn', icon: 'shield-keyhole-line', cls: 'mb-4',
+        text: '安全提示:初始化完成前,任何能访问本站的人都可以抢先创建管理员账号。请在部署后立即完成初始化。',
+      }) : '') +
       UI.banner({ id: 'login-err', kind: 'danger', cls: 'mb-4', hidden: true, html: '<span></span>' }) +
-      // 字段顺序即机制,新增字段别插进邮箱和密码之间:密码管理器把「密码框上方
-      // 最近的文本框」当账号,所以邮箱必须紧贴密码框,姓名殿后并标 autocomplete="name"
-      // 以人员语义退出凭据配对 —— 单靠令牌拦不住(实测 Chrome 仍会把紧贴密码框的
-      // 姓名当成账号,把「姓名+密码」存成一组凭据),顺序才是根治。
+      // 字段顺序即机制:邮箱紧贴密码框,姓名殿后并标 autocomplete="name"
       '<form id="auth-form">' + emailField + passwordField + nameField + rememberField +
       '<button type="submit" class="btn btn-filled btn-lg btn-block" id="auth-btn">' +
-      (isBootstrap ? '创建并登录' : '登 录') + '</button>' +
-      '</form></div></div>';
+      (isBootstrap ? '创建管理员并继续' : '登 录') + '</button>' +
+      '</form>',
+      isBootstrap ? '初始化 · 创建管理员账号' : '小团队自部署文档与知识库');
 
     const form = root.querySelector('#auth-form');
     form.addEventListener('submit', async (e) => {
@@ -442,12 +784,12 @@
       try {
         const r = await api(isBootstrap ? Endpoints.authBootstrap() : Endpoints.authLogin(),
           { method: 'POST', body });
-        if (!isBootstrap) UI.pref.set(REMEMBER_EMAIL_KEY, body.email); // 只在成功后记,避免记住打错的
+        if (!isBootstrap) UI.pref.set(REMEMBER_EMAIL_KEY, body.email);
         App.user = r.user;
         App.auth = null;
-        if (isBootstrap) UI.toast('初始化完成,已登录', 'success');
         setupShell();
-        location.replace('#/');
+        if (isBootstrap) renderFirstSpaceStep(root);
+        else location.replace('#/');
       } catch (err2) {
         btn.disabled = false;
         const errBox = root.querySelector('#login-err');
@@ -457,69 +799,80 @@
     });
   }
 
+  /** 初始化第二步:创建第一个空间并邀请成员;跳过后直接进首页(个人空间) */
+  function renderFirstSpaceStep(root) {
+    let members = [];
+    root.innerHTML = brandCard(
+      '<div class="bootstrap-steps"><span class="bs-step done">1 管理员</span><span class="bs-step current">2 第一个空间</span></div>' +
+      '<div class="field"><label>空间名</label><input class="input" id="bs-space-name" maxlength="100" placeholder="例如:产品设计"></div>' +
+      '<div class="field"><label>描述(可选)</label><input class="input" id="bs-space-desc" maxlength="200" placeholder="这个空间用来做什么"></div>' +
+      '<div class="field"><label>邀请成员(可选)</label>' +
+      '<div id="bs-members" class="chip-row"></div>' +
+      UI.btn({ id: 'bs-pick', label: '选择成员', icon: 'user-add-line', kind: 'tonal', size: 'sm' }) + '</div>' +
+      '<div class="form-inline mt-4">' +
+      UI.btn({ id: 'bs-create', label: '创建并进入', kind: 'filled', size: 'lg' }) +
+      UI.btn({ id: 'bs-skip', label: '稍后再说', kind: 'text' }) + '</div>',
+      '初始化 · 第一个空间');
+
+    const membersEl = root.querySelector('#bs-members');
+    function renderMembers() {
+      membersEl.innerHTML = members.map((m) =>
+        '<span class="chip selected" data-uid="' + UI.esc(m.id) + '">' +
+        UI.esc(m.name || m.email) + UI.icon('close-line') + '</span>').join('');
+    }
+    membersEl.addEventListener('click', (e) => {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      members = members.filter((m) => m.id !== chip.dataset.uid);
+      renderMembers();
+    });
+    root.querySelector('#bs-pick').onclick = async () => {
+      const picked = await UI.personPicker({
+        title: '邀请同事加入空间', multi: true,
+        excludeIds: members.map((m) => m.id),
+        roleSelect: { label: '加入角色', value: 'EDITOR',
+          options: [{ value: 'EDITOR', label: '编辑者' }, { value: 'VIEWER', label: '只读成员' }] },
+        confirmLabel: '邀请',
+      });
+      if (!picked || !picked.length) return;
+      members = members.concat(picked);
+      renderMembers();
+    };
+    root.querySelector('#bs-skip').onclick = () => { location.replace('#/'); };
+    root.querySelector('#bs-create').onclick = async () => {
+      const name = root.querySelector('#bs-space-name').value.trim();
+      if (!name) { UI.toast('空间名不能为空', 'warning'); return; }
+      const btn = root.querySelector('#bs-create');
+      btn.disabled = true;
+      try {
+        const p = await api(Endpoints.projects(), {
+          method: 'POST',
+          body: {
+            name,
+            description: root.querySelector('#bs-space-desc').value.trim(),
+            members: members.map((m) => ({ userId: m.id, role: m.role || 'EDITOR' })),
+          },
+        });
+        App.spaces = null;
+        location.replace(App.route.project(p.id, 'home'));
+      } catch (e) {
+        btn.disabled = false;
+        UI.err(e);
+      }
+    };
+    root.querySelector('#bs-space-name').focus();
+  }
+
   // ---------- 启动 ----------
   document.addEventListener('DOMContentLoaded', () => {
-    const shell = document.getElementById('shell');
-    const gs = document.getElementById('global-search');
-    const collapseBtn = document.getElementById('side-collapse');
-
-    // 侧栏双态(宽屏内联 / 窄屏抽屉)状态机统一在 UI.dualPanel:一个布尔、一个类,
-    // 「开」的宽屏形态是 240px 内联、「开」的窄屏形态是抽屉,CSS 见 app.css 的
-    // #shell.side-open 两条规则。拖窗口不会改变开/关,只会改变形态
-    const sidePanel = UI.dualPanel({
-      el: shell,
-      openCls: 'side-open',
-      prefKey: 'td:side-open',
-      onChange: syncCollapseBtn,
-    });
-
-    /** 按钮标题如实描述"点了会怎样"(状态机每次置位后回调;宽窄同语义) */
-    function syncCollapseBtn(p) {
-      collapseBtn.title = p.isOpen() ? '收起侧栏' : '展开侧栏';
-    }
-
-    collapseBtn.addEventListener('click', () => sidePanel.toggle());
-
-    // 抽屉聚焦辅助:搜索框刚从 display:none 恢复,同帧 focus 会失效,延后一帧再聚焦
-    function openNavDrawer(focusSearch) {
-      sidePanel.open();
-      if (focusSearch) requestAnimationFrame(() => { gs.focus(); gs.select(); });
-    }
-    // 路由切换时的"关抽屉"是窄屏礼仪(抽屉盖着新页面),宽屏内联侧栏不受路由影响 —
-    // 若不分宽度地 close(),宽屏每次导航都会把侧栏收起并持久化,等于替用户开关
-    App.closeNavDrawer = function () { if (sidePanel.isNarrow()) sidePanel.close(); };
-    // rail 态的搜索按钮:窄屏打开抽屉并聚焦输入框;宽屏先展开侧栏再聚焦
-    document.getElementById('side-search-btn').addEventListener('click', () => {
-      if (sidePanel.isNarrow()) openNavDrawer(true);
-      else { sidePanel.setOpen(true); gs.focus(); gs.select(); }
-    });
-    document.getElementById('side-scrim').addEventListener('click', sidePanel.close);
-    // 选中导航项后收起(仅抽屉形态;项目节点行是纯展开/收起,不关抽屉;Esc 归 UI.dualPanel)
-    document.getElementById('sidebar').addEventListener('click', (e) => {
-      const item = e.target.closest('.side-item');
-      if (sidePanel.isNarrow() && item && !item.classList.contains('side-proj')) sidePanel.close();
-    });
-
-    // 侧栏全局搜索:回车跳转 #/search?q=;Ctrl+K 聚焦(窄屏先展开抽屉,宽屏折叠态先展开图标栏)
-    gs.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const q = gs.value.trim();
-        const target = '#/search' + (q ? '?q=' + encodeURIComponent(q) : '');
-        if (location.hash === target) route(); // hash 未变化时手动触发重新搜索
-        else location.hash = target;
-      }
-    });
+    setupTopbar();
+    App.syncUser();
     document.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
-        if (sidePanel.isNarrow()) openNavDrawer(true);
-        else {
-          sidePanel.setOpen(true);
-          gs.focus(); gs.select();
-        }
+        if (window.Palette) Palette.open();
       }
     });
-    setupUserMenu();
     window.addEventListener('hashchange', guardedRoute);
     route();
   });

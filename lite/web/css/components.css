@@ -109,20 +109,17 @@
 /* 字段的紧凑排布(如"标签在左、输入在右"的行内表单):由容器决定间距,字段自身不再撑开 */
 .field.flush { margin-bottom: 0; }
 
-/* 输入类控件:填充 + 常驻 1px 描边。
-   关键:底色比所在表面**高一档**(模态框是 container,字段是 container-highest),
-   且描边常驻 —— 两道保险任一失效都不会隐形。
-   此前底色与 .modal-box 同为 --md-surface-container-high(同一个令牌!),
-   未聚焦时两者完全同色、只剩"没有边框"的一行文字,正是"没选中就区分不开"的根因;
-   聚焦才改底色还有一个副作用:深色下 lowest(#0c0d0f)在浅底上是一块突兀的黑。 */
+/* 输入类控件:M3 filled(浅底 + 激活下沿线),弃 outlined 大框。
+   底色比所在表面高一档;下沿线常驻,聚焦只换主线色,不再整框描边。 */
 .input, .select, .textarea {
   width: 100%;
   font: inherit;
   font-size: var(--fs-body);
   color: var(--md-on-surface);
   background: var(--md-surface-container-highest);
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--radius-s);
+  border: 1px solid transparent;
+  border-bottom-color: var(--md-outline);
+  border-radius: var(--radius-m) var(--radius-m) var(--radius-s) var(--radius-s);
   padding: var(--sp-2) var(--sp-3);
   transition: border-color var(--motion-fast), background-color var(--motion-fast), box-shadow var(--motion-fast);
 }
@@ -134,11 +131,11 @@
    左右内边距保留:那是给右侧原生箭头留的位置。 */
 .select { padding-top: 0; padding-bottom: 0; }
 .input::placeholder, .textarea::placeholder { color: var(--md-outline); }
-.input:hover, .select:hover, .textarea:hover { border-color: var(--md-outline); }
-/* 聚焦只用"描边转主色 + 光环"表达,不再改底色 */
+.input:hover, .select:hover, .textarea:hover { border-bottom-color: var(--md-on-surface-variant); }
+/* 聚焦:下沿线转主色 + 2px 光环(全站统一的 focus 语言) */
 .input:focus, .select:focus, .textarea:focus {
   outline: none;
-  border-color: var(--md-primary);
+  border-bottom-color: var(--md-primary);
   box-shadow: var(--focus-ring);
 }
 .input:disabled, .select:disabled, .textarea:disabled { opacity: .6; cursor: not-allowed; }
@@ -172,6 +169,7 @@
 /* ============ 卡片 ============ */
 .card {
   background: var(--md-surface-container-low);
+  border: 1px solid var(--md-outline-variant);
   border-radius: var(--radius-l);
   padding: var(--sp-5);
 }
@@ -448,7 +446,7 @@
 
 /* ============ 抽屉遮罩(基类) ============
    位置 / 遮罩色 / 淡入只在这里;**何时显示**由宿主的状态规则决定
-   (壳侧栏 #shell.side-open .side-scrim、文档树 .docs-wrap.tree-open .doc-tree-scrim)。
+   (壳侧栏 #shell.side-open .side-scrim)。
    四边逐个写在前、inset 在后:旧内核(Chrome <87)只认 inset 时 fixed 元素会
    因缺定位塌缩,遮罩盖不住页面(回退手法与 .modal-mask 同源)。 */
 .scrim {
@@ -873,6 +871,7 @@
   display: flex;
   align-items: center;
   gap: var(--sp-3);
+  min-height: var(--row-h);
   padding: var(--sp-2-5) 0;
   border-bottom: 1px solid color-mix(in srgb, var(--md-outline-variant) var(--divider, 55%), transparent);
 }

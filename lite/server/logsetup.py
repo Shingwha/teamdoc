@@ -13,7 +13,7 @@ import logging
 import queue
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 
-from models import DATA_DIR
+from config import DATA_DIR
 
 # 日志跟数据走(TEAMDOC_DATA_DIR/logs):同一实例的日志与数据在一起,多实例/测试天然隔离
 LOG_DIR = DATA_DIR / "logs"

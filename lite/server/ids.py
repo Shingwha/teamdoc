@@ -29,7 +29,7 @@ _ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"   # Crockford Base32:无 I L O U
 ID_LEN = 26
 _RAND_BITS = 80
 
-# 形状判定只有这一处:is_id / 引用解析(refs.py)/ payload 与查询串(auth.id_field)
+# 形状判定只有这一处:is_id / 引用解析(services/refs.py)/ 字段解析(http_util.py)
 # 全走它。字母表里没有需要转义的字符,可以直接进字符类。
 ID_PATTERN = re.compile(rf"[{_ALPHABET}]{{{ID_LEN}}}")
 

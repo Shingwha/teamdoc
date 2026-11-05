@@ -22,10 +22,14 @@ window.Views = window.Views || {};
   window.FilesAPI = {
     url(kind, id) { return kind === 'folder' ? Endpoints.folder(id) : Endpoints.file(id); },
     download(id, inline) { return Ref.downloadUrl(id, inline); },
+    /** 历史版本下载:版本号是 fileDownload 的可选第三参(见 ref/interfaces.md)。 */
+    downloadVersion(id, version) { return Endpoints.fileDownload(id, false, version); },
     /** 上传地址。opts 二选一:
      *  {projectId, folderId?, name} 云空间"传到当前目录";
      *  {docId, name}               文档附件 —— 项目与「文档附件」目录由服务端按文档归属
      *                              推导(文档可能刚被移到别的项目,前端手里的 projectId 会过期)。
+     *  nameMode/versionOf 只在撞名 409 之后的重试里出现:keep = 保留两个(服务端 dedupe),
+     *  versionOf = 为已有文件登记新版本。两者互斥(服务端 400)。
      */
     upload(opts) {
       return Endpoints.fileUpload({
@@ -33,16 +37,43 @@ window.Views = window.Views || {};
         docId: opts.docId || undefined,
         projectId: opts.docId ? undefined : opts.projectId,
         folderId: opts.folderId || undefined,
+        name_mode: opts.nameMode || undefined,
+        version_of: opts.versionOf || undefined,
       });
     },
   };
+
+  /** 服务端时间为 UTC naive(与 UI.fmtDate / fmtWhen 同口径):无时区后缀按 UTC 解析。 */
+  function parseWhen(s) {
+    if (!s) return null;
+    const str = String(s);
+    const hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(str);
+    const d = new Date(hasTz ? str : str.replace(' ', 'T') + 'Z');
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  /** 相对时间(名称下的元信息行用):近处给"刚刚/N 分钟前/N 小时前/N 天前",
+      超过一个月退回短日期。解析失败时退回 UI.fmtDate,不吞掉原始值。 */
+  function relTime(s) {
+    const d = parseWhen(s);
+    if (!d) return UI.fmtDate(s);
+    const diff = Date.now() - d.getTime();
+    if (diff < 60 * 1000) return '刚刚';
+    if (diff < 3600 * 1000) return Math.floor(diff / (60 * 1000)) + ' 分钟前';
+    if (diff < 24 * 3600 * 1000) return Math.floor(diff / (3600 * 1000)) + ' 小时前';
+    if (diff < 30 * 24 * 3600 * 1000) return Math.floor(diff / (24 * 3600 * 1000)) + ' 天前';
+    return UI.fmtDateShort(s);
+  }
+
+  /** 文件行的版本标签:历史数据的 version 缺失时按 1 处理(服务端每个文件至少一版)。 */
+  const versionNo = (f) => 'v' + (Number(f.version) || 1);
 
   /**
    * 云空间主体:返回交给上层的 DocumentFragment(不套壳)。
    * 上层给的槽位就是 #proj-body,这里的节点必须直接落进去 —— 中间多一层 div 就改掉了
    * #proj-body 的直接子结构(布局契约不许)。
    */
-  window.Views.driveBody = function ({ projectId, proj, folderId: initialFolder, highlight }) {
+  window.Views.driveBody = function ({ projectId, proj, folderId: initialFolder, highlight, dispose }) {
     // 写/移动一律 UI.canEdit(EDITOR+),与文档 tab 同口径:自己另写一套角色比较会让
     // "非成员全局管理员在云空间没有写按钮、在文档 tab 却能建文档"这类不一致重新出现。
     // VIEWER 天然过不了 EDITOR。
@@ -55,13 +86,17 @@ window.Views = window.Views || {};
     const curFolderId = () => stack[stack.length - 1].id;
     // 排序与视图形态都记忆在 localStorage:云空间是高频重复访问的页面,
     // 每次进来都回到默认值会让人反复重设。
-    // 网格(图片墙)态的默认排序是"最新在前" —— 图片墙的用途就是"看最近传了什么图",
-    // 按名称排会把图片散在大目录各处。仅在用户没主动选过排序时套用这个默认。
+    // 网格是默认形态(§6.5);只有用户主动选过列表才停在列表。
     const savedSort = UI.pref.get('td:drive-sort', null);
-    let viewMode = UI.pref.get('td:drive-view') === 'grid' ? 'grid' : 'list';
+    const savedDir = UI.pref.get('td:drive-dir', null);
+    // 窄屏强制列表(§6.11):prefView 记住用户主动选的形态,离开窄屏后恢复;
+    // 窄屏期间的 viewMode 恒为 list,不写回偏好 —— 否则一次手机访问会永久改掉桌面形态。
+    const isNarrow = () => !!(UI.NARROW && UI.NARROW.matches);
+    let prefView = UI.pref.get('td:drive-view') === 'list' ? 'list' : 'grid';
+    let viewMode = isNarrow() ? 'list' : prefView;
     let sortKey = savedSort || (viewMode === 'grid' ? 'time' : 'name'); // name | time | size
-    let sortDir = UI.pref.get('td:drive-dir', null)
-      ? (UI.pref.get('td:drive-dir') === 'desc' ? -1 : 1)
+    let sortDir = savedDir
+      ? (savedDir === 'desc' ? -1 : 1)
       : (viewMode === 'grid' ? -1 : 1);
     const PAGE = 100;      // 单页文件数,与「加载更多」配合
     let loadedFiles = 0;   // 已加载的文件条数(分页游标 = offset)
@@ -91,11 +126,26 @@ window.Views = window.Views || {};
               { key: 'grid', label: '网格', icon: 'grid-fill' },
             ],
           }) +
+          // 排序在网格下也必须可达(网格没有表头),与列头读写同一组偏好
+          UI.seg({
+            id: 'drive-sort-seg', cls: 'drive-sort-seg', auto: true, active: sortKey,
+            items: [{ key: 'name', label: '名称' }, { key: 'time', label: '时间' }, { key: 'size', label: '大小' }],
+          }) +
+          UI.iconBtn({
+            id: 'btn-sort-dir', cls: 'drive-sort-dir',
+            icon: sortDir === 1 ? 'sort-asc' : 'sort-desc',
+            title: sortDir === 1 ? '升序,点击切换为降序' : '降序,点击切换为升序',
+          }) +
           (canWrite
             ? UI.btn({ id: 'btn-mkdir', label: '新建文件夹', icon: 'folder-add-line', kind: 'tonal', size: 'sm' }) +
               UI.btn({ id: 'btn-upload-dir', label: '上传文件夹', icon: 'folder-upload-line', kind: 'tonal', size: 'sm' }) +
+              // 选中单个文件时才出现(updateBatchBar 切换 hidden):主入口,不需要先删旧文件
+              UI.btn({ id: 'btn-version-upload', label: '上传新版本', icon: 'upload-cloud-2-line',
+                       kind: 'filled', size: 'sm', attrs: 'hidden',
+                       title: '为选中的文件上传新版本(文件名保持不变)' }) +
               UI.btn({ id: 'btn-upload', label: '上传', icon: 'upload-2-line', kind: 'filled', size: 'sm' })
             : '') +
+          '<input type="file" id="version-input" hidden>' +
           '<input type="file" id="upload-input" multiple hidden>' +
           '<input type="file" id="upload-dir-input" webkitdirectory hidden>',
       }) +
@@ -143,6 +193,10 @@ window.Views = window.Views || {};
     const upTitle = root.querySelector('#up-title');
     const truncEl = root.querySelector('#drive-trunc');
     const viewSeg = root.querySelector('#drive-view-seg');
+    const sortSeg = root.querySelector('#drive-sort-seg');
+    const sortDirBtn = root.querySelector('#btn-sort-dir');
+    const versionBtn = root.querySelector('#btn-version-upload');
+    const versionInput = root.querySelector('#version-input');
     // 批量栏三个按钮在渲染期抓好引用:updateBatchBar 是晚于挂载运行的,
     // 那时片段已被搬空(root.querySelector 会拿到 null)
     const batchDlBtn = root.querySelector('#batch-dl');
@@ -150,6 +204,10 @@ window.Views = window.Views || {};
     const selected = new Set(); // 多选状态:"{kind}:{id}"
     let activeUploads = 0;      // 进行中上传数(>0 时上传面板不可收起)
     let lastFolders = [];       // 最近一次加载的文件夹行(网格视图重绘用)
+    let singleVersionTarget = null; // 工具条「上传新版本」作用的对象(恰好选中一个文件)
+    let versionTarget = null;   // 版本输入框这次为哪个文件选文件
+    let conflicts = [];         // 同名 409 收集队列:整批队列清空后只弹一次窗口
+    let conflictModal = null;   // 当前冲突窗口(避免并行批次弹第二个)
 
     /** 面包屑是 stack(路径栈)的投影,**唯一绘制点在 load()** —— 改了 stack 的每一步
      *  (gotoFolder 下钻 / 面包屑回跳 / resolveStack 深链解析)都必经 load()。
@@ -181,6 +239,26 @@ window.Views = window.Views || {};
       UI.sortHeadSet(tableEl, { key: sortKey, dir: sortDir });
     }
 
+    /** 排序控件的唯一绘制点:表头图标、工具条分段与方向按钮同源同步。
+     *  三处(表头 / 工具条 / 方向)都经 applySort 改状态,不各自写一份偏好。 */
+    function paintSortControls() {
+      if (sortSeg) UI.segSet(sortSeg, sortKey);
+      if (sortDirBtn) {
+        sortDirBtn.innerHTML = UI.icon(sortDir === 1 ? 'sort-asc' : 'sort-desc');
+        sortDirBtn.title = sortDir === 1 ? '升序,点击切换为降序' : '降序,点击切换为升序';
+      }
+      renderHeadSorts();
+    }
+
+    async function applySort(nextKey, nextDir) {
+      sortKey = nextKey;
+      sortDir = nextDir;
+      UI.pref.set('td:drive-sort', sortKey);
+      UI.pref.set('td:drive-dir', sortDir === 1 ? 'asc' : 'desc');
+      paintSortControls();
+      await load();
+    }
+
     // 行/瓦片共用的命中测试属性:只留 kind 与 id(行本体在 itemIndex 里)
     function attrsFor(row) {
       return 'data-kind="' + row.kind + '" data-id="' + UI.esc(row.id) + '"';
@@ -209,6 +287,10 @@ window.Views = window.Views || {};
         isFolder && { icon: 'download-2-line', title: '打包下载', cls: 'act-download-dir' },
         !isFolder && canPreview && { icon: 'eye-line', title: '预览', cls: 'act-preview' },
         !isFolder && { icon: 'download-2-line', title: '下载', cls: 'act-download' },
+        // 显式上传新版本是日常迭代文件的主入口;VIEWER 只能看历史,不能上传
+        !isFolder && canWrite && { icon: 'upload-cloud-2-line',
+                                   title: '上传新版本(文件名保持不变)', cls: 'act-version-upload' },
+        !isFolder && { icon: 'history-line', title: '版本历史', cls: 'act-versions' },
         canWrite && { icon: 'edit-line', title: '重命名', cls: 'act-rename' },
         !isFolder && canWrite && {
           icon: row.shared ? 'link' : 'share-line',
@@ -222,12 +304,18 @@ window.Views = window.Views || {};
       ].filter(Boolean)
         .map((a) => UI.iconBtn({ icon: a.icon, title: a.title, danger: a.danger, size: 'sm', cls: a.cls }))
         .join('');
+      // 名称下第二行只在文件行出现:版本号 + 大小 + 相对时间(窄屏隐藏时间列后仍然可见)
+      const nameLink = '<span class="drive-name-stack">' +
+        '<button class="row-link" type="button" title="' + UI.esc(row.name) + '">' + UI.esc(row.name) + '</button>' +
+        (isFolder ? '' : '<span class="drive-name-sub">' + UI.esc(versionNo(row) + ' · ' +
+          UI.fmtSize(row.size) + ' · ' + relTime(row.updatedAt || row.createdAt)) + '</span>') +
+        '</span>';
       return UI.tableRow(
         [
           {
             html: UI.cellName({
               icon: fi.icon, iconCls: fi.cls,
-              link: '<button class="row-link" type="button" title="' + UI.esc(row.name) + '">' + UI.esc(row.name) + '</button>',
+              link: nameLink,
               badges: (referenced
                 ? '<span class="badge" title="有文档引用了此文件,删除后引用将失效">被引用</span>' : '') +
                 (!isFolder && row.shared
@@ -246,6 +334,22 @@ window.Views = window.Views || {};
       );
     }
 
+    /** 网格瓦片 hover 操作条:版本是文件的主操作,网格下不能只靠右键。
+     *  与行操作/右键菜单共用同一组处理函数(pickVersionFile / openVersionDrawer / fileMenuItems),
+     *  不另写一套入口逻辑。文件夹的点击即进入,不需要版本操作。
+     *  触屏没有 hover,常显由 drive.css 的 (pointer: coarse) 规则负责。 */
+    function tileActsHtml(row) {
+      if (row.kind !== 'file') return '';
+      return '<div class="tile-acts">' +
+        (canWrite ? UI.iconBtn({
+          icon: 'upload-cloud-2-line', title: '上传新版本(文件名保持不变)',
+          size: 'sm', cls: 'act-version-upload',
+        }) : '') +
+        UI.iconBtn({ icon: 'history-line', title: '版本历史', size: 'sm', cls: 'act-versions' }) +
+        UI.iconBtn({ icon: 'more-2-line', title: '更多操作', size: 'sm', cls: 'act-tile-more' }) +
+        '</div>';
+    }
+
     /** 网格/图片墙瓦片。图片用原图 + CSS 缩放 + lazy loading —— 不引 Pillow 生成缩略图:
      *  内网带宽够,零后端依赖更值。多选在网格下同样可用(左上角选择框)。 */
     function tileHtml(row) {
@@ -260,10 +364,13 @@ window.Views = window.Views || {};
         ' ' + attrsFor(row) + ' title="' + UI.esc(row.name) + '">' +
         '<input type="checkbox" class="sel-box tile-check"' + (selected.has(key) ? ' checked' : '') + '>' +
         '<div class="tile-thumb">' + thumb +
+        tileActsHtml(row) +
         (!isFolder && row.shared ? '<span class="badge xs primary tile-pub" title="已建立分享链接">已分享</span>' : '') +
         '</div>' +
         '<div class="tile-name">' + UI.esc(row.name) + '</div>' +
-        '<div class="tile-meta">' + (isFolder ? '文件夹' : UI.esc(UI.fmtSize(row.size))) + '</div>' +
+        '<div class="tile-meta">' + (isFolder ? '文件夹'
+          : UI.esc(versionNo(row) + ' · ' + UI.fmtSize(row.size) + ' · ' +
+                   relTime(row.updatedAt || row.createdAt))) + '</div>' +
         '</div>';
     }
 
@@ -329,10 +436,15 @@ window.Views = window.Views || {};
 
     async function load(opts) {
       const append = opts && opts.append;
+      const keepSelection = opts && opts.keepSelection;
       // 导航状态 → DOM 的唯一投影点:面包屑只依赖 stack(调用方在进来之前已更新),
       // 与请求结果无关,所以放在取数之前 —— 请求失败也不会把导航停在过期路径上。
       renderCrumb();
-      if (!append) { loadedFiles = 0; selected.clear(); }
+      // keepSelection:上传新版本/轮询刷新时保留多选;换目录/普通首屏仍清空
+      if (!append) {
+        loadedFiles = 0;
+        if (!keepSelection) selected.clear();
+      }
       const dir = curFolderId();
       const params = {
         project_id: projectId,
@@ -357,7 +469,7 @@ window.Views = window.Views || {};
         hasMore = !!data.hasMore;
         lastFolders.forEach((r) => itemIndex.set(keyOf(r), r));
         loadedRows.forEach((r) => itemIndex.set(keyOf(r), r));
-        renderHeadSorts();
+        paintSortControls();
         // 文件夹数受服务端 2000 上限:真的超出才提示(文件走分页,不再是问题)
         const folderExtra = Math.max(0, (data.total.folders || 0) - lastFolders.length);
         if (folderExtra > 0) {
@@ -376,10 +488,13 @@ window.Views = window.Views || {};
           rowsEl.appendChild(UI.emptyState({
             icon: 'cloud-line',
             title: '这里还是空的',
-            desc: '上传文件或新建文件夹,也可以直接把文件拖进来',
-            action: { label: '上传文件', onClick: () => uploadInput.click() },
+            // VIEWER 不出现写入口:空态的快捷上传与工具条按钮同口径隐藏
+            desc: canWrite ? '上传文件或新建文件夹,也可以直接把文件拖进来'
+              : '等待编辑者上传文件或新建文件夹',
+            action: canWrite ? { label: '上传文件', onClick: () => uploadInput.click() } : undefined,
           }));
           renderMore();
+          updateBatchBar(); // 空目录也要把工具条的「上传新版本」收回去
           return;
         }
         if (viewMode === 'grid') renderGrid(lastFolders, loadedRows, append ? pageRows : null);
@@ -421,6 +536,214 @@ window.Views = window.Views || {};
 
     function triggerDownload(f) { UI.download(FilesAPI.download(f.id, false), { filename: f.name || '' }); }
 
+    // ---------- 版本:显式上传新版本 / 历史抽屉 ----------
+    /** 「上传新版本」的选文件入口:三处(行操作/右键/工具条)共用。
+     *  上传的是文件内容,文件名由服务端沿用 target.name —— 不需要先删旧文件。 */
+    function pickVersionFile(f) {
+      if (!canWrite || !f || f.kind !== 'file') return;
+      versionTarget = f;
+      versionInput.value = '';
+      versionInput.click();
+    }
+
+    /** 显式新版本的备注(可选,≤200):上传前弹一次,留空即不写备注。
+     *  返回 null = 取消上传,空串 = 不写备注。 */
+    function askVersionNote(f) {
+      return UI.formModal({
+        title: '上传新版本 · ' + f.name,
+        okText: '开始上传',
+        fields: [{
+          name: 'note', label: '版本备注(可选)', type: 'textarea', rows: 2, maxlength: 200,
+          help: '最多 200 字;备注会显示在版本时间线上,便于同事理解这次改了什么',
+        }],
+        submit: (v, { close }) => close(String(v.note || '').trim().slice(0, 200)),
+      }).result;
+    }
+
+    versionInput.addEventListener('change', async () => {
+      const picked = (versionInput.files || [])[0];
+      const target = versionTarget;
+      versionTarget = null;
+      versionInput.value = '';
+      if (!picked || !target) return;
+      const note = await askVersionNote(target);
+      if (note === null) return; // 取消 = 不上传
+      // 与普通上传共用队列/进度面板:大文件同样有进度,且并发 3 的上限一致
+      enqueue([{ file: picked, target, note }]);
+    });
+
+    if (versionBtn) versionBtn.onclick = () => { if (singleVersionTarget) pickVersionFile(singleVersionTarget); };
+
+    // 版本历史抽屉:右侧 400px(窄屏全屏)。生命周期挂在本视图上 —— dispose 时关抽屉、
+    // 摘全局监听,不留孤儿节点。
+    let versionDrawer = null;
+    function onDrawerKey(e) {
+      if (e.key === 'Escape') closeVersionDrawer();
+    }
+
+    function closeVersionDrawer() {
+      const d = versionDrawer;
+      if (!d) return;
+      versionDrawer = null;
+      if (UI.NARROW && d.onNarrow) UI.NARROW.removeEventListener('change', d.onNarrow);
+      document.removeEventListener('keydown', onDrawerKey, true);
+      d.scrim.remove();
+      d.el.remove();
+    }
+
+    /** 版本时间线的一行:版本号/时间/大小/操作者;当前版带徽标,非当前版可恢复。 */
+    function versionItemHtml(v, current) {
+      const num = Number(v.version) || 0;
+      const isCurrent = num === current;
+      const who = v.createdByName || '未知用户';
+      return '<div class="drive-v-item' + (isCurrent ? ' current' : '') + '" data-version="' + num + '">' +
+        '<span class="drive-v-dot"></span>' +
+        '<div class="drive-v-main">' +
+          '<div class="drive-v-head">' +
+            '<span class="drive-v-no">v' + num + '</span>' +
+            (isCurrent ? UI.badge({ text: '当前', kind: 'primary', cls: 'xs' }) : '') +
+            '<span class="drive-v-when" title="' + UI.esc(UI.fmtDate(v.createdAt)) + '">' +
+              UI.esc(UI.fmtWhen(v.createdAt)) + '</span>' +
+          '</div>' +
+          '<div class="drive-v-meta">' + UI.esc(UI.fmtSize(v.size)) + ' · ' + UI.esc(who) + '</div>' +
+          (v.note ? '<div class="drive-v-note">' + UI.esc(v.note) + '</div>' : '') +
+          '<div class="drive-v-acts">' +
+            UI.btn({ label: '下载', kind: 'text', size: 'sm', cls: 'drive-v-dl' }) +
+            (canWrite && !isCurrent
+              ? UI.btn({ label: '恢复此版本', kind: 'tonal', size: 'sm', cls: 'drive-v-restore' })
+              : '') +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    /** 只画抽屉本体;数据由 loadVersions 异步填(骨架已在 render 段给出)。 */
+    function openVersionDrawer(f) {
+      closeVersionDrawer();
+      const scrim = document.createElement('div');
+      scrim.className = 'scrim drive-drawer-scrim';
+      const el = document.createElement('aside');
+      el.className = 'drive-drawer';
+      el.setAttribute('role', 'dialog');
+      el.setAttribute('aria-label', '版本历史');
+      el.innerHTML =
+        '<div class="drive-drawer-head">' +
+          '<div class="drive-drawer-heading">' +
+            '<div class="drive-drawer-title">版本历史</div>' +
+            '<div class="drive-drawer-sub" id="drive-v-sub">' + UI.esc(f.name) + '</div>' +
+          '</div>' +
+          UI.iconBtn({ icon: 'close-line', title: '关闭', size: 'sm', cls: 'drive-drawer-close' }) +
+        '</div>' +
+        '<div class="drive-drawer-body" id="drive-v-body">' + UI.skeleton('lines', 6) + '</div>';
+      document.body.appendChild(scrim);
+      document.body.appendChild(el);
+      const onNarrow = () => el.classList.toggle('is-narrow', !!(UI.NARROW && UI.NARROW.matches));
+      onNarrow();
+      if (UI.NARROW) UI.NARROW.addEventListener('change', onNarrow);
+      versionDrawer = { el, scrim, file: f, onNarrow };
+      scrim.onclick = closeVersionDrawer;
+      el.querySelector('.drive-drawer-close').onclick = closeVersionDrawer;
+      document.addEventListener('keydown', onDrawerKey, true);
+      el.querySelector('#drive-v-body').addEventListener('click', onVersionAction);
+      loadVersions(f);
+    }
+
+    async function loadVersions(f) {
+      const d = versionDrawer;
+      if (!d || d.file !== f) return;
+      const body = d.el.querySelector('#drive-v-body');
+      try {
+        const versions = await api(Endpoints.fileVersions(f.id)) || [];
+        if (!versionDrawer || versionDrawer !== d) return; // 抽屉在请求期间被关掉/换了文件
+        const current = versions.length ? Number(versions[0].version) : 0;
+        const sub = d.el.querySelector('#drive-v-sub');
+        if (sub) sub.textContent = f.name + ' · 共 ' + versions.length + ' 个版本';
+        if (!versions.length) {
+          body.innerHTML = '';
+          body.appendChild(UI.emptyState({ icon: 'history-line', title: '暂无版本记录', sm: true }));
+          return;
+        }
+        body.innerHTML = '<div class="drive-timeline">' +
+          versions.map((v) => versionItemHtml(v, current)).join('') + '</div>';
+      } catch (e) {
+        if (versionDrawer === d) body.innerHTML = UI.errorBanner(e);
+      }
+    }
+
+    async function onVersionAction(e) {
+      const d = versionDrawer;
+      const item = e.target.closest('.drive-v-item');
+      if (!d || !item) return;
+      const num = Number(item.dataset.version) || 0;
+      if (e.target.closest('.drive-v-dl')) {
+        UI.download(FilesAPI.downloadVersion(d.file.id, num), { filename: d.file.name || '' });
+        return;
+      }
+      if (!e.target.closest('.drive-v-restore')) return;
+      const ok = await UI.confirmDialog(
+        '恢复 v' + num + ' 会把该版本的内容登记为一个新版本,现有历史全部保留。确定恢复?',
+        { okText: '恢复', danger: false });
+      if (!ok || !versionDrawer) return;
+      try {
+        const updated = await api(Endpoints.fileRestore(d.file.id), {
+          method: 'POST', body: { version: num },
+        });
+        const newNo = updated && updated.version ? ' v' + updated.version : '';
+        UI.toast('已从 v' + num + ' 恢复' + (newNo ? ',' + newNo + ' 已生成' : ''), 'success');
+        if (updated) versionDrawer.file = Object.assign({}, versionDrawer.file, updated);
+        await load({ keepSelection: true });
+        if (versionDrawer) await loadVersions(versionDrawer.file);
+      } catch (err) { UI.err(err); }
+    }
+
+    // 文件菜单:行右键与网格瓦片「更多」共用同一份条目(处理函数也同一份)。
+    // trigger 传元素时按元素右缘对齐;右键传坐标时按坐标定位。
+    function fileMenuItems(f) {
+      const items = [];
+      if (canWrite) {
+        items.push({ icon: 'upload-cloud-2-line', label: '上传新版本', onClick: () => pickVersionFile(f) });
+      }
+      items.push({ icon: 'history-line', label: '版本历史', onClick: () => openVersionDrawer(f) });
+      items.push({ divider: true });
+      items.push({ icon: 'download-2-line', label: '下载', onClick: () => triggerDownload(f) });
+      return items;
+    }
+
+    function openRowMenu(x, y, items, trigger) {
+      UI.closeOpenMenu();
+      const menu = document.createElement('div');
+      menu.className = 'menu';
+      items.forEach((it) => {
+        if (it.divider) {
+          const dv = document.createElement('div');
+          dv.className = 'menu-divider';
+          menu.appendChild(dv);
+          return;
+        }
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'menu-item' + (it.danger ? ' danger' : '');
+        b.innerHTML = UI.icon(it.icon) + '<span>' + UI.esc(it.label) + '</span>';
+        b.addEventListener('click', () => {
+          layer.close();
+          if (it.onClick) it.onClick();
+        });
+        menu.appendChild(b);
+      });
+      const layer = trigger
+        ? UI.floatingLayer(menu, { trigger, align: 'end' })
+        : UI.floatingLayer(menu, { rect: { left: x, right: x, top: y, bottom: y } });
+      return layer;
+    }
+
+    rowsEl.addEventListener('contextmenu', (e) => {
+      const f = itemOf(e.target);
+      if (!f || f.kind !== 'file') return;
+      e.preventDefault();
+      openRowMenu(e.clientX, e.clientY, fileMenuItems(f));
+    });
+
+
     // ---------- 多选与批量操作 ----------
     function selectedRows() {
       // 选中集以 "kind:id" 为键,对象本体在 itemIndex —— 与 DOM 无关
@@ -437,6 +760,9 @@ window.Views = window.Views || {};
         (folderCount ? '(含 ' + folderCount + ' 个文件夹,将保留目录结构)' : '');
       // 文件夹也能打包(服务端递归展开),所以只要有选择按钮就可用
       batchDlBtn.disabled = rows.length === 0;
+      // 版本是单个文件的事实:只有恰好选中一个文件时才出现「上传新版本」主按钮
+      singleVersionTarget = canWrite && rows.length === 1 && rows[0].kind === 'file' ? rows[0] : null;
+      if (versionBtn) versionBtn.hidden = !singleVersionTarget;
       const boxes = [...rowsEl.querySelectorAll('.sel-box')];
       checkAll.checked = boxes.length > 0 && boxes.every((b) => b.checked);
       checkAll.indeterminate = !checkAll.checked && boxes.some((b) => b.checked);
@@ -635,6 +961,8 @@ window.Views = window.Views || {};
       }
       if (e.target.closest('.act-preview')) { await openPreview(f); return; }
       if (e.target.closest('.act-download')) { triggerDownload(f); return; }
+      if (e.target.closest('.act-version-upload')) { pickVersionFile(f); return; }
+      if (e.target.closest('.act-versions')) { openVersionDrawer(f); return; }
       // 文件夹的下载图标 = 打包下载整棵子树(保留目录结构)
       if (e.target.closest('.act-download-dir')) {
         UI.download(Endpoints.filesZip({ folderIds: f.id }),
@@ -660,6 +988,13 @@ window.Views = window.Views || {};
           projectId, parentId: curFolderId(), onDone: load });
         return;
       }
+      // 网格瓦片的「更多」:与右键菜单同一份条目
+      if (e.target.closest('.act-tile-more')) {
+        openRowMenu(0, 0, fileMenuItems(f), e.target.closest('.act-tile-more'));
+        return;
+      }
+      // 操作条自身的空白区不落到"打开/下载"
+      if (e.target.closest('.tile-acts')) return;
 
       // 点击名称 / 网格瓦片:按类型穷举 —— 文件夹下钻、可预览的打开预览、其余下载。
       // 未知类型什么都不做:绝不能让"类型不认识"静默退化成一次下载(那会打到同 id 的文件)
@@ -680,26 +1015,53 @@ window.Views = window.Views || {};
     // 客户端只排当前页会得到"每页内部有序"这种看似正确实则错误的结果
     tableEl.querySelectorAll('.dh-sort').forEach((b) => {
       b.addEventListener('click', async () => {
-        if (sortKey === b.dataset.sort) sortDir = -sortDir;
-        else { sortKey = b.dataset.sort; sortDir = 1; }
-        UI.pref.set('td:drive-sort', sortKey);
-        UI.pref.set('td:drive-dir', sortDir === 1 ? 'asc' : 'desc');
-        await load();
+        const nextKey = b.dataset.sort;
+        await applySort(nextKey, nextKey === sortKey ? -sortDir : 1);
       });
     });
 
-    // 视图切换:列表 / 网格(记忆)
+    // 工具条排序:网格没有表头,这里是网格下唯一的排序入口;与列头同一组状态
+    if (sortSeg) UI.segWire(sortSeg, async (key) => {
+      if (key === sortKey) return;
+      await applySort(key, 1);
+    });
+    if (sortDirBtn) sortDirBtn.onclick = async () => {
+      await applySort(sortKey, -sortDir);
+    };
+
+    // 视图切换:列表 / 网格(记忆)。窄屏强制列表(§6.11):网格按钮禁用,
+    // 形态由 MQL 决定而非点击 —— 离开窄屏后恢复用户此前主动选择的形态。
     if (viewSeg) UI.segWire(viewSeg, async (key) => {
+      if (key === 'grid' && isNarrow()) { UI.segSet(viewSeg, 'list'); return; }
+      prefView = key;
       viewMode = key;
-      UI.pref.set('td:drive-view', viewMode);
+      UI.pref.set('td:drive-view', prefView);
       // 切到网格而用户从未主动选过排序时,用"最新在前"(图片墙的用途);
       // 一旦用户点过列头排序(savedSort 有值),就尊重他的选择
       if (viewMode === 'grid' && !UI.pref.get('td:drive-sort', null)) {
         sortKey = 'time';
         sortDir = -1;
+        paintSortControls();
       }
       await load();
     });
+
+    /** 窄屏形态切换:强制列表并禁用网格按钮;离开时恢复偏好形态。 */
+    function applyNarrowView() {
+      const narrow = isNarrow();
+      const gridBtn = viewSeg && viewSeg.querySelector('button[data-key="grid"]');
+      if (gridBtn) gridBtn.disabled = narrow;
+      const want = narrow ? 'list' : prefView;
+      if (want === viewMode) {
+        if (viewSeg) UI.segSet(viewSeg, viewMode);
+        return;
+      }
+      viewMode = want;
+      if (viewSeg) UI.segSet(viewSeg, viewMode);
+      load();
+    }
+    applyNarrowView();
+    if (UI.NARROW) UI.NARROW.addEventListener('change', applyNarrowView);
 
     // 面包屑回跳:裁剪栈,当前目录随栈顶一起回退
     UI.crumbsWire(crumbEl, async (idx) => {
@@ -732,6 +1094,10 @@ window.Views = window.Views || {};
     let upRunning = 0, upDone = 0, upTotal = 0;
 
     function updateUpTitle() {
+      if (!upRunning && !upQueue.length && conflicts.length) {
+        upTitle.textContent = '有 ' + conflicts.length + ' 个同名文件待处理';
+        return;
+      }
       upTitle.textContent = upRunning || upQueue.length
         ? '上传中 ' + upDone + '/' + upTotal : '上传完成';
     }
@@ -757,8 +1123,24 @@ window.Views = window.Views || {};
     // 请求体 = 文件本身(raw body),元数据走 query string —— 见 files.py upload_file
     // 的注释:multipart 会让 >1MB 的文件在服务端落两次盘(先 spool 再拷),
     // 传大文件要两倍空间与 IO。
-    function xhrUpload(file, targetFolderId, onProgress) {
-      return apiUpload(FilesAPI.upload({ projectId, folderId: targetFolderId, name: file.name }), file, { onProgress });
+    // task.target 非空 = 显式上传新版本:走 /files/{id}/versions,文件名由服务端保持。
+    function xhrUpload(task, onProgress) {
+      const url = task.target
+        ? Endpoints.fileVersionUpload(task.target.id, undefined, task.note)
+        : FilesAPI.upload({
+            projectId,
+            folderId: task.folderId,
+            name: task.file.name,
+            nameMode: task.nameMode,
+            versionOf: task.versionOf,
+          });
+      return apiUpload(url, task.file, { onProgress });
+    }
+
+    /** 普通上传撞同目录同名的 409:服务端只做预检、未写任何数据,文件还在内存的
+     *  File 对象里。收集到 conflicts 队列,整批队列清空后只弹一次窗口。 */
+    function isNameConflict(err) {
+      return !!(err && err.code === 'name_exists' && err.detail && err.detail.existing);
     }
 
     function pumpQueue() {
@@ -766,26 +1148,119 @@ window.Views = window.Views || {};
         const task = upQueue.shift();
         upRunning++;
         updateUpTitle();
-        xhrUpload(task.file, task.folderId, (pct) => setUpState(task.row, pct, pct + '%'))
+        xhrUpload(task, (pct) => setUpState(task.row, pct, pct + '%'))
           .then(() => setUpState(task.row, 100, '完成', 'ok'))
-          .catch((err) => setUpState(task.row, 100, err.message, 'fail'))
+          .catch((err) => {
+            if (!task.target && isNameConflict(err)) {
+              // 计入冲突而不是失败:行停在"待选择",用户选完再重试
+              task.conflicted = true;
+              setUpState(task.row, 0, '同名,待选择', 'warn');
+              conflicts.push({ task, existing: err.detail.existing });
+              return;
+            }
+            setUpState(task.row, 100, err.message, 'fail');
+          })
           .finally(() => {
             upRunning--;
-            upDone++;
+            if (!task.conflicted) upDone++;
             activeUploads = upRunning + upQueue.length;
             updateUpTitle();
-            if (!activeUploads) load(); // 队列清空后统一刷新列表
+            if (!activeUploads) afterUpIdle();
             pumpQueue();
           });
       }
     }
 
-    // 入队一组任务:{file, folderId}
+    /** 队列清空 ≠ 批次结束:还有同名冲突就先弹批量选择器,否则统一刷新当前目录
+     *  (keepSelection 让"上传新版本"之后的行选中态不丢)。 */
+    function afterUpIdle() {
+      if (conflicts.length) resolveConflicts();
+      else load({ keepSelection: true });
+    }
+
+    /** 批量同名冲突:一次弹窗、逐行选择。选择后按行用 name_mode=keep 或
+     *  version_of=existing.id 重试;关闭窗口 = 明确跳过(不静默丢文件)。 */
+    function resolveConflicts() {
+      if (!conflicts.length || conflictModal) return;
+      const batch = conflicts.slice();
+      let submitted = false;
+      conflictModal = UI.modal({
+        title: '同名文件处理',
+        body: '<p class="modal-text">本次上传有 ' + batch.length +
+          ' 个文件与当前目录中的文件同名。请逐个选择处理方式;关闭窗口会跳过这些文件。</p>' +
+          '<div class="drive-conflicts">' + batch.map((c, i) => {
+            const ex = c.existing || {};
+            return '<div class="drive-conflict">' +
+              '<div class="drive-conflict-main">' +
+                '<div class="drive-conflict-name" title="' + UI.esc(c.task.file.name) + '">' +
+                  UI.esc(c.task.file.name) + '</div>' +
+                '<div class="drive-conflict-tip">已存在同名文件 · ' + UI.esc(UI.fmtSize(ex.size)) +
+                  ' · ' + UI.esc(UI.fmtWhen(ex.updatedAt)) +
+                  (ex.updatedByName ? ' · 由 ' + UI.esc(ex.updatedByName) + ' 上传' : '') + '</div>' +
+              '</div>' +
+              '<select class="select drive-conflict-mode" data-i="' + i + '">' +
+                '<option value="version">创建为新版本</option>' +
+                '<option value="keep">保留两个(自动改名)</option>' +
+              '</select>' +
+            '</div>';
+          }).join('') + '</div>',
+        actions: [
+          { label: '跳过这些文件', kind: 'text', onClick: ({ close }) => close() },
+          { label: '继续上传', kind: 'filled', onClick: ({ body, close, btn }) => {
+            btn.disabled = true;
+            const choices = batch.map((c, i) => {
+              const sel = body.querySelector('.drive-conflict-mode[data-i="' + i + '"]');
+              return { conflict: c, mode: sel ? sel.value : 'version' };
+            });
+            submitted = true;
+            conflicts = conflicts.filter((c) => batch.indexOf(c) < 0);
+            close();
+            retryConflicts(choices);
+          } },
+        ],
+        onClose: () => {
+          conflictModal = null;
+          if (!submitted) skipConflicts(batch);
+          if (conflicts.length) resolveConflicts(); // 弹窗期间又上传出的冲突,再走一轮
+        },
+      });
+    }
+
+    function skipConflicts(batch) {
+      batch.forEach((c) => setUpState(c.task.row, 100, '已跳过', 'warn'));
+      conflicts = conflicts.filter((c) => batch.indexOf(c) < 0);
+      upDone += batch.length;
+      updateUpTitle();
+      UI.toast('已跳过 ' + batch.length + ' 个同名文件(未上传)', 'warning');
+      if (!conflicts.length) load({ keepSelection: true });
+    }
+
+    /** 冲突重试:沿用原任务的行(进度条不新增一行),选择决定重试参数。 */
+    function retryConflicts(choices) {
+      if (!choices.length) return;
+      upPanel.hidden = false;
+      choices.forEach(({ conflict, mode }) => {
+        const task = conflict.task;
+        setUpState(task.row, 0, '等待中');
+        upQueue.push({
+          file: task.file,
+          folderId: task.folderId,
+          row: task.row,
+          nameMode: mode === 'keep' ? 'keep' : undefined,
+          versionOf: mode === 'version' ? conflict.existing.id : undefined,
+        });
+      });
+      activeUploads = upRunning + upQueue.length;
+      updateUpTitle();
+      pumpQueue();
+    }
+
+    // 入队一组任务:{file, folderId} 普通上传;{file, target} 显式上传新版本
     function enqueue(tasks) {
-      if (!tasks.length) return;
+      if (!canWrite || !tasks.length) return;
       upPanel.hidden = false;
       tasks.forEach((t) => {
-        t.row = addUpRow(t.file.name);
+        t.row = addUpRow(t.target ? '新版本 · ' + t.target.name : t.file.name);
         upQueue.push(t);
       });
       upTotal += tasks.length;
@@ -820,6 +1295,7 @@ window.Views = window.Views || {};
 
     // 入队带相对路径的文件(来自 webkitdirectory / 拖拽目录)
     async function enqueueWithPaths(items) {
+      if (!canWrite) return;
       const tasks = [];
       try {
         for (const it of items) {
@@ -873,7 +1349,7 @@ window.Views = window.Views || {};
     ['dragenter', 'dragover'].forEach((ev) => {
       tableEl.addEventListener(ev, (e) => {
         e.preventDefault();
-        tableEl.classList.add('dragover');
+        if (canWrite) tableEl.classList.add('dragover'); // VIEWER 不给"可以放进来"的暗示
       });
     });
     tableEl.addEventListener('dragleave', (e) => {
@@ -882,6 +1358,7 @@ window.Views = window.Views || {};
     tableEl.addEventListener('drop', async (e) => {
       e.preventDefault();
       tableEl.classList.remove('dragover');
+      if (!canWrite) return;
       const items = Array.from((e.dataTransfer && e.dataTransfer.items) || []);
       const entries = items.map((it) => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null)).filter(Boolean);
       if (entries.length) {
@@ -908,6 +1385,52 @@ window.Views = window.Views || {};
         }
       }
     }).catch((e) => UI.err(e));
+
+    // ---------- 变更轮询与离开清理 ----------
+    // 同一空间的其他人上传/改版本后,当前目录自动刷新:游标从服务端返回的 nextSeq
+    // 继续;只在页面可见、且没有上传在飞时请求(上传中的重绘会打断进度观感)。
+    let changeSeq = 0;
+    let pollBusy = false;
+    let pollTimer = null;
+    let disposed = false;
+
+    async function pollChanges() {
+      if (disposed) return;
+      // 没接 dispose 时的兜底:行容器已经离开文档 = 本层被换掉,立刻停表
+      if (!rowsEl.isConnected) { cleanup(); return; }
+      if (document.visibilityState !== 'visible' || pollBusy || activeUploads || conflicts.length) return;
+      pollBusy = true;
+      try {
+        const r = await api(Endpoints.fileChanges(projectId, changeSeq)) || {};
+        if (disposed) return;
+        const changes = r.changes || [];
+        changeSeq = Number(r.nextSeq) || changeSeq;
+        if (changes.length) await load({ keepSelection: true });
+      } catch (e) {
+        // 轮询是辅助刷新:失败静默,下一轮从同一个 nextSeq 重试
+      } finally {
+        pollBusy = false;
+      }
+    }
+
+    const onVisibility = () => { if (document.visibilityState === 'visible') pollChanges(); };
+
+    /** 离开本层:定时器、全局监听与抽屉全部回收(抽屉挂在 body 上,不随作用域节点移除)。
+     *  dispose 由 filesLevel 的 ctx.dispose 注入(见 ref/interfaces.md);漏接时下一轮
+     *  tick 发现行容器已脱离文档也会自清。 */
+    function cleanup() {
+      if (disposed) return;
+      disposed = true;
+      clearInterval(pollTimer);
+      pollTimer = null;
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (UI.NARROW) UI.NARROW.removeEventListener('change', applyNarrowView);
+      closeVersionDrawer();
+    }
+
+    pollTimer = setInterval(pollChanges, 15000);
+    document.addEventListener('visibilitychange', onVisibility);
+    if (typeof dispose === 'function') dispose(cleanup);
 
     return root;
   };

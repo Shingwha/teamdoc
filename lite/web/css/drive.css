@@ -1,0 +1,213 @@
+/* drive.css — 云空间专属样式:版本元信息、44px 列表密度与版本历史抽屉。
+   共享组件(表格/按钮/菜单/模态)仍在 components.css;960 形态断点归 app.css
+   (布局契约:该断点只允许出现在 app.css),窄屏全屏由 UI.NARROW 在 JS 侧打
+   .is-narrow,这里只描述两种形态本身。 */
+
+/* ---- 列表密度:§6.5 要求云空间列表行 44px(其它数据表沿用 --row-h) ---- */
+.drive-table .data-table-row { height: 44px; }
+
+/* 操作列按最多 8 个按钮取齐:预览/下载/上传新版本/版本历史/重命名/分享/移动/删除。
+   多重类名是为了压过 app.css 里 .drive-table 的 6 档声明(加载顺序不敏感)。 */
+.data-table.drive-table { --acts-n: 8; }
+
+/* hidden 必须真的不参与布局:UI.btn 的 .btn 是 display:inline-flex,
+   会盖过浏览器默认的 [hidden]{display:none}。 */
+#btn-version-upload[hidden] { display: none; }
+
+/* ---- 名称下第二行:vN · 大小 · 相对时间 ----
+   名称列是弹性列:stack 自己收缩,长名字省略,徽标不被第二行挤走 */
+.drive-name-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.drive-name-stack .row-link { max-width: 100%; }
+.drive-name-sub {
+  font-size: var(--fs-xs);
+  line-height: 1.25;
+  color: var(--md-on-surface-variant);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 网格瓦片操作条 ----
+   缩略图右下角的悬浮操作条:上传新版本 / 版本历史 / 更多。默认只在悬停或键盘
+   聚焦时出现;触屏没有 hover,由 coarse pointer 规则常显(否则版本入口不可达)。 */
+.tile-acts {
+  --ctl-h: var(--ctl-s);
+  position: absolute;
+  right: var(--sp-1-5);
+  bottom: var(--sp-1-5);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-0-5);
+  padding: var(--sp-0-5);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--md-surface-container-lowest) 92%, transparent);
+  box-shadow: var(--shadow-1);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast);
+}
+.tile:hover .tile-acts,
+.tile:focus-within .tile-acts {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: none), (pointer: coarse) {
+  .tile-acts { opacity: 1; pointer-events: auto; }
+}
+
+/* 时间线里的版本备注(可空):与元信息同层,换行显示完整内容 */
+.drive-v-note {
+  margin-top: var(--sp-1);
+  font-size: var(--fs-label);
+  line-height: var(--lh-normal);
+  color: var(--md-on-surface);
+  overflow-wrap: anywhere;
+}
+
+/* 工具条排序控件:比视图切换更紧凑,避免和右侧上传按钮抢宽度 */
+.drive-sort-seg button { padding: 0 var(--sp-2); }
+
+/* ============ 版本历史抽屉 ============
+   右侧 400px(视口更窄时按 min(400px,100vw) 连续收缩);窄屏由 .is-narrow
+   扩到全屏。遮罩复用 .scrim 基类(定位/配色/淡入),这里只声明显示与层级。 */
+.drive-drawer-scrim {
+  display: block;
+  z-index: var(--z-drawer);
+}
+.drive-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(400px, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--md-surface-container-low);
+  border-left: 1px solid var(--md-outline-variant);
+  box-shadow: var(--shadow-2);
+  z-index: calc(var(--z-drawer) + 1);
+  animation: drive-drawer-in var(--motion);
+}
+.drive-drawer.is-narrow {
+  width: 100vw;
+  border-left: none;
+}
+@keyframes drive-drawer-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.drive-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+.drive-drawer-heading { min-width: 0; }
+.drive-drawer-title { font-size: var(--fs-title); font-weight: var(--fw-semi); }
+.drive-drawer-sub {
+  margin-top: var(--sp-0-5);
+  font-size: var(--fs-label);
+  color: var(--md-on-surface-variant);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drive-drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-4) var(--sp-6);
+}
+
+/* 时间线:左侧竖线 + 圆点,当前版主色;版本/时间/大小/操作者/操作逐条列出 */
+.drive-timeline { position: relative; }
+.drive-v-item {
+  position: relative;
+  padding: 0 0 var(--sp-4) var(--sp-5);
+}
+.drive-v-item::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 12px;
+  bottom: 0;
+  width: 1px;
+  background: var(--md-outline-variant);
+}
+.drive-v-item:last-child::before { display: none; }
+.drive-v-dot {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--md-outline);
+}
+.drive-v-item.current .drive-v-dot {
+  background: var(--md-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-primary) var(--state-selected), transparent);
+}
+.drive-v-main { min-width: 0; }
+.drive-v-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1-5);
+  flex-wrap: wrap;
+}
+.drive-v-no { font-size: var(--fs-body); font-weight: var(--fw-semi); }
+.drive-v-when { font-size: var(--fs-label); color: var(--md-on-surface-variant); }
+.drive-v-meta {
+  margin-top: 1px;
+  font-size: var(--fs-label);
+  color: var(--md-on-surface-variant);
+}
+.drive-v-acts {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1-5);
+}
+.drive-v-acts .btn { --ctl-h: var(--ctl-m); }
+
+/* ============ 同名冲突(批量上传后单次弹窗) ============ */
+.drive-conflicts {
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-top: var(--sp-2);
+}
+.drive-conflict {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-2-5) 0;
+  border-top: 1px solid var(--md-outline-variant);
+}
+.drive-conflict:first-child { border-top: none; }
+.drive-conflict-main { flex: 1 1 200px; min-width: 0; }
+.drive-conflict-name {
+  font-weight: var(--fw-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drive-conflict-tip { font-size: var(--fs-label); color: var(--md-on-surface-variant); }
+.drive-conflict-mode { flex: none; width: 190px; }
+
+/* 契约身份 2(密度/功能:≤720 表格行重排为两行卡片;44px 定高在此让位给内容高,
+   名称下的版本元信息仍然可见) */
+@media (max-width: 720px) {
+  .drive-table .data-table-row {
+    height: auto;
+    min-height: var(--row-h);
+  }
+}

@@ -296,6 +296,9 @@ window.UI = (function () {
     return el;
   }
 
+  /** 空状态的统一入口(新代码用它;emptyState 保留为它的实现,两者同一份 DOM) */
+  function empty(opts) { return emptyState(opts || {}); }
+
   /* ---------- 按钮 / 徽标 / 提示条(HTML 字符串工厂) ---------- */
 
   var BTN_KIND = {
@@ -753,6 +756,67 @@ window.UI = (function () {
   }
 
   /**
+   * 右侧抽屉(480px,窄屏全屏):空间设置等"在页面之上但不打断上下文"的面板。
+   * 与 modal 共用 Esc 栈与遮罩点击语义;body 为字符串或节点。
+   * @param {{title:string, body:string|HTMLElement, cls?:string, onClose?:Function}} opts
+   * @returns {{el:HTMLElement, box:HTMLElement, body:HTMLElement, close:Function, result:Promise}}
+   */
+  function drawer(opts) {
+    opts = opts || {};
+    var mask = document.createElement('div');
+    mask.className = 'drawer-mask';
+    var box = document.createElement('div');
+    box.className = 'drawer-box' + (opts.cls ? ' ' + opts.cls : '');
+    box.setAttribute('role', 'dialog');
+    box.tabIndex = -1;
+    mask.appendChild(box);
+
+    var resolveResult;
+    var result = new Promise(function (res) { resolveResult = res; });
+    var closed = false;
+    var handle = { el: mask, box: box, body: null, close: close, result: result };
+
+    function close(value) {
+      if (closed) return;
+      closed = true;
+      var idx = modalStack.indexOf(handle);
+      if (idx >= 0) modalStack.splice(idx, 1);
+      box.classList.add('closing');
+      mask.classList.add('closing');
+      setTimeout(function () { mask.remove(); }, 160);
+      resolveResult(value === undefined ? null : value);
+      if (opts.onClose) { try { opts.onClose(value === undefined ? null : value); } catch (e) { /* 忽略 */ } }
+    }
+    mask.addEventListener('pointerdown', function (e) { if (e.target === mask) close(null); });
+
+    var head = document.createElement('div');
+    head.className = 'drawer-head';
+    head.innerHTML = '<h3>' + esc(opts.title || '') + '</h3>';
+    var closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'btn-icon';
+    closeBtn.title = '关闭';
+    closeBtn.innerHTML = icon('close-line');
+    closeBtn.addEventListener('click', function () { close(null); });
+    head.appendChild(closeBtn);
+    box.appendChild(head);
+
+    var body = document.createElement('div');
+    body.className = 'drawer-body';
+    if (typeof opts.body === 'string') body.innerHTML = opts.body;
+    else if (opts.body) body.appendChild(opts.body);
+    box.appendChild(body);
+
+    handle.body = body;
+    document.body.appendChild(mask);
+    modalStack.push(handle);
+    var focusable = body.querySelector('input, select, textarea, button');
+    if (focusable) focusable.focus();
+    else box.focus();
+    return handle;
+  }
+
+  /**
    * 输入对话框,返回 Promise<string|null>(确定 → 输入值 trim 后;取消/关闭 → null)。
    * @param {{title:string, label?:string, value?:string, type?:string, autocomplete?:string,
    *          placeholder?:string, help?:string, okText?:string}} opts
@@ -1137,7 +1201,8 @@ window.UI = (function () {
    * 下拉菜单:绑定到 trigger 的点击;自动定位、点击外部 / Esc 关闭。
    * items 为数组或返回数组的函数(每次打开时求值,适合内容随状态变化的菜单)。
    * 数组元素:{icon?, label, danger?, disabled?, onClick, keepOpen?} | {divider:true} | {custom:HTMLElement}
-   * @returns {Function} close 手动关闭函数
+   * opts.menuCls:附加到浮层根节点的类(自定义面板样式用)
+   * @returns {{close:Function, open:Function}} close 手动关闭;open 强制打开(已开则重建)
    */
   function dropdownMenu(trigger, items, opts) {
     opts = opts || {};
@@ -1150,7 +1215,7 @@ window.UI = (function () {
 
     function show() {
       var menu = document.createElement('div');
-      menu.className = 'menu';
+      menu.className = 'menu' + (opts.menuCls ? ' ' + opts.menuCls : '');
 
       var list = typeof items === 'function' ? items() : items;
       (list || []).forEach(function (it) {
@@ -1180,7 +1245,9 @@ window.UI = (function () {
       var layer = floatingLayer(menu, { trigger: trigger, align: opts.align, direction: opts.direction });
       var close = layer.close;
     }
-    return { close: closeOpenMenu };
+    // 程序化打开(首页空态的"发现空间"入口用):已开着也重建,内容总是按最新状态求值
+    function open() { closeOpenMenu(); show(); }
+    return { close: closeOpenMenu, open: open };
   }
 
 
@@ -1292,6 +1359,18 @@ window.UI = (function () {
    *  opts 透传 banner 的 sm/cls 等(如小面板内的紧凑档) */
   function errorBanner(e, opts) {
     return banner(Object.assign({ kind: 'danger', text: (e && e.message) || '操作失败' }, opts));
+  }
+
+  /** 错误态的统一入口:错误对象 → 横幅;配置对象 → 带文案/操作/尺寸的横幅。
+   *  @param {Error|{message:string, action?:{label:string,id?:string}, sm?:boolean, cls?:string}} o
+   *  @param {{sm?:boolean, cls?:string}} [opts] 错误对象的横幅选项(透传 errorBanner) */
+  function error(o, opts) {
+    const cfg = o && typeof o === 'object' && !(o instanceof Error);
+    if (cfg && (o.action || o.sm || o.cls)) {
+      return banner({ kind: 'danger', icon: 'error-warning-line',
+        text: o.message, action: o.action, sm: o.sm, cls: o.cls });
+    }
+    return errorBanner(o, opts);
   }
 
   /**
@@ -1618,14 +1697,17 @@ window.UI = (function () {
     loadingRow: loadingRow,
     skeleton: skeleton,
     emptyState: emptyState,
+    empty: empty,
     emptyHtml: emptyHtml,
     errorBanner: errorBanner,
+    error: error,
     loadInto: loadInto,
     confirmAction: confirmAction,
     toast: toast,
     err: err,
     modal: modal,
     confirmDialog: confirmDialog,
+    drawer: drawer,
     inputDialog: inputDialog,
     formModal: formModal,
     personPicker: personPicker,

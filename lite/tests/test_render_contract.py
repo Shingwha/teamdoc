@@ -14,6 +14,7 @@ import pytest
 
 from _chrome import dump_page, error_trap_js, find_chrome, login_js, read_report, temp_page
 from _harness import WEB_DIR
+from test_editor_cm6 import EDITOR_SCRIPTS
 
 JS_DIR = WEB_DIR / "js"
 
@@ -37,7 +38,7 @@ PROBE_INJECT = '''  <script>
   (function () {
     var OUT = {};
     var Q = new URLSearchParams(location.search);
-    var PID = Q.get('pid'), D1 = Q.get('d1'), D2 = Q.get('d2');
+    var PID = Q.get('pid'), D1 = Q.get('d1'), D2 = Q.get('d2'), D3 = Q.get('d3');
     function report() {
       var l = ['hash=' + location.hash, 'errors=' + (window.__errors.join(' | ') || 'none')];
       Object.keys(OUT).forEach(function (k) { l.push(k + '=' + OUT[k]); });
@@ -65,21 +66,21 @@ PROBE_INJECT = '''  <script>
       setTimeout(function () {
         location.hash = '#/p/' + PID + '/docs/' + D1;
         setTimeout(function () {
-          OUT.sideProbed = probe('#side-projects') ? 1 : 0;
+          OUT.sideProbed = probe('#side-nav') ? 1 : 0;
           OUT.treeProbed = probe('#doc-tree') ? 1 : 0;
-          // 先折叠一个节点:切文档后这个折叠态必须还在(否则等于整树重建过)
+          // 先折叠父文档:切到折叠区外的文档后,折叠态必须还在(否则等于整树重建过)
           var caret = document.querySelector('#doc-tree .tree-caret:not(.leaf)');
           if (caret) caret.click();
           OUT.collapsedBefore = document.querySelector('#doc-tree .tree-children[hidden]') ? 1 : 0;
-          // 记下基线,然后点另一篇文档(真实用户动作:点树行)
+          // 记下基线,然后点另一篇**顶层**文档(真实用户动作:点树行)
           var base = window.__reqs.length;
-          var row = document.querySelector('#doc-tree .doc-row[data-id="' + D2 + '"]');
+          var row = document.querySelector('#doc-tree .doc-row[data-id="' + D3 + '"]');
           OUT.targetFound = row ? 1 : 0;
           if (!row) { report(); return; }
           row.click();
           setTimeout(function () {
             OUT.treeSame = document.querySelector('#doc-tree[data-probe]') ? 1 : 0;
-            OUT.sideSame = document.querySelector('#side-projects[data-probe]') ? 1 : 0;
+            OUT.sideSame = document.querySelector('#side-nav[data-probe]') ? 1 : 0;
             OUT.refetched = fetchSince(base).join(',') || 'none';
             OUT.collapsedKept = document.querySelector('#doc-tree .tree-children[hidden]') ? 1 : 0;
             // 复用的父层要跟着子层换人:树上高亮行必须移到刚点的那一篇
@@ -87,20 +88,32 @@ PROBE_INJECT = '''  <script>
             OUT.activeRow = act ? act.dataset.id : '(无)';
             var t = document.querySelector('#doc-title');
             OUT.editorTitle = t ? t.value : '(无标题框)';
-            OUT.editorBody = document.querySelector('#md-source, #md-preview') ? 1 : 0;
-            // 再切一次功能(文档 → 云空间 → 文档):侧栏与文档树节点都不该被换掉,
-            // 项目对象与文档树(也)不该重新取 —— 项目层在这一跳里被复用
-            var base2 = window.__reqs.length;
-            location.hash = '#/p/' + PID + '/files';
+            OUT.editorBody = document.querySelector('#md-source .cm-editor, #md-preview') ? 1 : 0;
+            // 再点折叠区里的子文档:必须展开祖先并让它可见,但树本身仍是原来那个节点
+            var hiddenRow = document.querySelector('#doc-tree .doc-row[data-id="' + D2 + '"]');
+            OUT.childFound = hiddenRow ? 1 : 0;
+            if (hiddenRow) hiddenRow.click();
             setTimeout(function () {
-              location.hash = '#/p/' + PID + '/docs/' + D1;
+              OUT.revealExpanded = document.querySelector('#doc-tree .tree-children[hidden]') ? 0 : 1;
+              var act2 = document.querySelector('#doc-tree .doc-row.active');
+              OUT.activeRow2 = act2 ? act2.dataset.id : '(无)';
+              var t2 = document.querySelector('#doc-title');
+              OUT.editorTitle2 = t2 ? t2.value : '(无标题框)';
+              OUT.treeSameAfterReveal = document.querySelector('#doc-tree[data-probe]') ? 1 : 0;
+              // 再切一次功能(文档 → 云空间 → 文档):侧栏与文档树节点都不该被换掉,
+              // 项目对象与文档树(也)不该重新取 —— 项目层在这一跳里被复用
+              var base2 = window.__reqs.length;
+              location.hash = '#/p/' + PID + '/files';
               setTimeout(function () {
-                OUT.sideSameAfterTab = document.querySelector('#side-projects[data-probe]') ? 1 : 0;
-                // 反过来的一面:文档模块离开过就重建(不做跨模块 keep-alive),所以
-                // 探针不该还在 —— 这一条钉的是"作用域即生命期",不是"越省越好"
-                OUT.docsTreeRecreatedAfterTab = document.querySelector('#doc-tree[data-probe]') ? 0 : 1;
-                OUT.tabRefetch = factsSince(base2).join(',') || 'none';
-                report();
+                location.hash = '#/p/' + PID + '/docs/' + D1;
+                setTimeout(function () {
+                  OUT.sideSameAfterTab = document.querySelector('#side-nav[data-probe]') ? 1 : 0;
+                  // 反过来的一面:文档模块离开过就重建(不做跨模块 keep-alive),所以
+                  // 探针不该还在 —— 这一条钉的是"作用域即生命期",不是"越省越好"
+                  OUT.docsTreeRecreatedAfterTab = document.querySelector('#doc-tree[data-probe]') ? 0 : 1;
+                  OUT.tabRefetch = factsSince(base2).join(',') || 'none';
+                  report();
+                }, 1500);
               }, 1500);
             }, 1500);
           }, 1500);
@@ -155,11 +168,13 @@ def test_doc_switch_reuses_everything_but_the_editor(base_url, admin):
     d1 = admin.post(f"/api/projects/{pid}/docs", {"title": "契约文档甲"})
     d2 = admin.post(f"/api/projects/{pid}/docs",
                     {"title": "契约文档乙", "parentId": d1.data["id"]})
-    assert d1.status == 200 and d2.status == 200, f"建文档失败: {d1.data} {d2.data}"
+    d3 = admin.post(f"/api/projects/{pid}/docs", {"title": "契约文档丙"})
+    assert d1.status == 200 and d2.status == 200 and d3.status == 200, \
+        f"建文档失败: {d1.data} {d2.data} {d3.data}"
 
     try:
-        query = f"pid={pid}&d1={d1.data['id']}&d2={d2.data['id']}"
-        inject = PROBE_INJECT.replace("__LOGIN_JS__", login_js()).replace("__ERRTRAP_JS__", error_trap_js())
+        query = f"pid={pid}&d1={d1.data['id']}&d2={d2.data['id']}&d3={d3.data['id']}"
+        inject = EDITOR_SCRIPTS + PROBE_INJECT.replace("__LOGIN_JS__", login_js()).replace("__ERRTRAP_JS__", error_trap_js())
         with temp_page("_render_contract.html", inject) as page_name:
             info = read_report(dump_page(chrome, base_url, page_name, query, budget=30000))
     finally:
@@ -185,11 +200,19 @@ def test_doc_switch_reuses_everything_but_the_editor(base_url, admin):
     if info.get("refetched") != "none":
         problems.append(f"切换文档时重新取了项目对象/文档树: {info.get('refetched')}")
     if info.get("collapsedBefore") == "1" and info.get("collapsedKept") != "1":
-        problems.append("切换文档后文档树的折叠态丢了(说明整树重绘过)")
-    if info.get("activeRow") != str(d2.data["id"]):
+        problems.append("切到折叠区外的文档后折叠态丢了(说明整树重绘过)")
+    if info.get("activeRow") != str(d3.data["id"]):
         problems.append(f"文档树的高亮行没跟着切: {info.get('activeRow')}")
-    if info.get("editorTitle") != "契约文档乙":
-        problems.append(f"编辑区没有换成第二篇文档: title={info.get('editorTitle')!r}")
+    if info.get("editorTitle") != "契约文档丙":
+        problems.append(f"编辑区没有换成第三篇文档: title={info.get('editorTitle')!r}")
     if info.get("editorBody") != "1":
         problems.append("编辑区正文区没渲染出来")
+    if info.get("childFound") != "1":
+        problems.append("没找到折叠区里的子文档,展开祖先断言未执行")
+    if info.get("revealExpanded") != "1" or info.get("treeSameAfterReveal") != "1":
+        problems.append("切到折叠区里的子文档时没有原地展开祖先(或整树被重建)")
+    if info.get("activeRow2") != str(d2.data["id"]):
+        problems.append(f"展开后高亮行没落到子文档: {info.get('activeRow2')}")
+    if info.get("editorTitle2") != "契约文档乙":
+        problems.append(f"展开后编辑区没有换成子文档: title={info.get('editorTitle2')!r}")
     assert not problems, "渲染契约失败:\n" + "\n".join("  - " + p for p in problems)

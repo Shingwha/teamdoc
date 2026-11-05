@@ -1,231 +1,12 @@
-"""数据模型与数据库连接(构建文档 §5)。
-
-- SQLite(WAL 模式,busy_timeout=5000,foreign_keys=ON)
-- **资源表主键:ULID 字符串**(users/pats/projects/project_members/docs/doc_versions/
-  folders/files/login_events,外键同为 String(26))。id 不透明 ⇒ 不可枚举;字典序 =
-  创建顺序 ⇒ 列表与树按 id 排序即按创建先后。生成与形状判定只在 ids.py 一处。
-  id 是纯标识、可公开显示,不承载秘密;结构不符的库由 schema.init 拒绝启动。
-- **秘密与标识分离**:会话的键是随机 token(sessions.token,即 Cookie 值),
-  PAT 的秘密是 token_hash —— 两者不随"标识数字化"变得可猜。
-- 登录相关(pats/sessions/login_events/throttle_state):会话带来源与最近活跃(仅管理员
-  可见);login_events 是登录审计(有保留期);throttle_state 是凭据尝试的节流计数。
-- **不存派生值**:表里只放无法重算的事实。文件类型由名字推导(media.guess_mime),
-  不存在列里 —— 存了就得在判定规则演进时回填,而漏掉的行会以"预览打不开"的形式出现。
-- 时间戳:UTC 无时区 naive
-"""
-import logging
-import shutil
-import time
+"""SQLAlchemy ORM：资源 id 使用 ULID，时间戳为 UTC naive datetime。"""
 from datetime import datetime
-from pathlib import Path
 
-from fastapi import Request
-from sqlalchemy import (
-    Boolean, Float, ForeignKey, Index, Integer, Text, String,
-    UniqueConstraint, create_engine, event, func,
-)
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
-from sqlalchemy.pool import NullPool
+from sqlalchemy import (Boolean, Float, ForeignKey, Index, Integer, String, Text,
+                        UniqueConstraint)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from config import DATA_DIR
+from db import utcnow
 from ids import ID_LEN, new_id
-
-logger = logging.getLogger("teamdoc.db")
-
-BASE_DIR = Path(__file__).resolve().parent
-FILES_DIR = DATA_DIR / "files"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-FILES_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = DATA_DIR / "teamdoc.db"
-
-# 正在上传的物理文件名(进程内登记)。上传是"先落盘、后提交 DB",这段时间它在库里还
-# 没有记录;孤儿清理若只按 DB 比对,就会把在传文件当垃圾删掉 —— 上传随后提交成功,
-# 记录指向已删文件,永久 404 且无任何提示。清理侧必须跳过这里登记的名字。
-# 单 worker 部署下该集合才是精确的。
-INFLIGHT_STORAGE: set[str] = set()
-
-# "连接不参与长 I/O"不变量的可观测阈值:正常请求毫秒级,超过即记 WARNING
-DB_WARN_SECONDS = 2.0
-
-# 不用连接池:SQLite 是单文件、单写者,连接廉价,而队列池的"上限 + 借不到就等"
-# 会把任何一条慢连接放大成全站排队 —— 流式端点(下载/上传)恰好最擅长长时间占住
-# 一条连接。NullPool 下每条会话按需开、用完关,慢查询只影响它自己的那个请求。
-engine = create_engine(
-    f"sqlite:///{DB_PATH}",
-    connect_args={"check_same_thread": False},
-    poolclass=NullPool,
-)
-
-
-@event.listens_for(engine, "connect")
-def _set_pragmas(dbapi_conn, _):
-    cur = dbapi_conn.cursor()
-    # busy_timeout 必须先设:它决定后面这些语句在库被别处写入时愿意等多久
-    cur.execute("PRAGMA busy_timeout=5000")
-    cur.execute("PRAGMA journal_mode=WAL")
-    cur.execute("PRAGMA foreign_keys=ON")
-    cur.close()
-
-
-SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
-
-def get_db(request: Request):
-    """请求级会话。**只有一两句查询的端点用它就对了**;凡是随后要搬运大量字节的
-    端点(下载/上传/打包/备份),必须在此之前调用 release_db()。"""
-    db = SessionLocal()
-    started = time.monotonic()
-    try:
-        yield db
-    finally:
-        db.close()
-        held = time.monotonic() - started
-        if held > DB_WARN_SECONDS:
-            # 把"连接不参与长 I/O"这条不变量变成可观测的:正常请求都是毫秒级
-            logger.warning("数据库会话持有 %.1fs:%s %s", held,
-                           request.method, request.url.path)
-
-
-def release_db(db) -> None:
-    """提前归还连接:事务的边界是"用库的那一段",不是"整个请求"。
-
-    FastAPI 的 yield 依赖要等**响应体发完**才执行清理(fastapi/routing.py 的
-    request_response),所以文件响应与流式响应会把连接占满全程 —— 几 GB 的下载、
-    几小时的上传都算;客户端中途消失(睡眠/断网/暂停下载)时这条连接再也回不来。
-    Session.close() 可重复调用,提前关了不影响依赖自己的 close()。
-    """
-    db.close()
-
-
-def is_live(res) -> bool:
-    """资源是否存在且未被删除。
-
-    REST 的"已删 → 404"与 WS 的"已删 → 4404"共用这一条判定:两个传输层的错误通道
-    不同(HTTP 状态码 / WebSocket 关闭码),但"什么算可见"必须同源 —— 否则会出现
-    "网页说文档没了,长连接还能接着写"。
-    """
-    return res is not None and res.deleted_at is None
-
-
-def storage_basename(storage_path: str) -> str:
-    """库里那一列 storage_path 的**唯一解释**:物理文件名,不含任何目录成分。
-
-    取 basename 而不是直接用它的值,是安全边界:即使库里出现带路径的值,也绝不会被
-    拼成 data/files/../../ 之类的越界路径。物理文件的目录只由 FILES_DIR 决定,
-    所以"数据目录整体搬走"这件事成立。
-    """
-    return Path(storage_path).name
-
-
-def file_abspath(storage_path: str) -> Path:
-    """把 files.storage_path 解析成物理文件的绝对路径。"""
-    return FILES_DIR / storage_basename(storage_path)
-
-
-def utcnow() -> datetime:
-    return datetime.utcnow()
-
-
-def disk_total_bytes(path=None) -> int:
-    """磁盘总容量(存储总览用;与 disk_free_bytes 同源,不各 stat 一次)。"""
-    return shutil.disk_usage(str(path or DATA_DIR)).total
-
-
-def disk_free_bytes(path=None) -> int:
-    """磁盘剩余字节。上传前预检、写盘循环中复查、存储总览、备份前检查共用这一处读取。
-
-    path 默认为数据目录;备份要检查的是**目标盘**的余量,所以由调用方传入。
-    """
-    return shutil.disk_usage(str(path or DATA_DIR)).free
-
-
-def unlink_quiet(path) -> bool:
-    """删除物理文件,失败不抛错。返回是否真的删掉了。
-
-    语义:DB 记录已删/已提交时,物理清理失败**不应**让整个请求失败 ——
-    用户看到的是"删除成功",而残留文件由管理后台的孤儿清理兜底。
-    反过来则不可以:先删文件再删记录,一旦提交失败就变成"文件没了但记录还在"。
-    """
-    if not path:
-        return False
-    try:
-        Path(path).unlink(missing_ok=True)
-        return True
-    except OSError:
-        return False
-
-
-def build_tree(rows, node_fn) -> list:
-    """把(已排序的)model 行组装成嵌套树,返回根节点列表。
-
-    行须有 id / parent_id(Doc 与 Folder 同构);node_fn(row) 产出的节点字典
-    须含 "id" 并预置 "children": []。父不在集合内(父已删)的行视为根。
-    文档树与文件夹树共用,勿再各写一份遍历。"""
-    nodes = {r.id: node_fn(r) for r in rows}
-    roots = []
-    for r in rows:
-        node = nodes[r.id]
-        parent = nodes.get(r.parent_id) if r.parent_id else None
-        (parent["children"] if parent else roots).append(node)
-    return roots
-
-
-def collect_subtree(db, model, root) -> list:
-    """root 自身 + 全部后代 id(不看删除状态 —— 删除/恢复/彻底删除/防环移动统一使用)。
-    Doc 与 Folder 同构(id/parent_id/project_id),一份实现两处用。"""
-    rows = db.query(model.id, model.parent_id).filter_by(project_id=root.project_id).all()
-    children: dict = {}
-    for nid, pid in rows:
-        children.setdefault(pid, []).append(nid)
-    result, stack = [], [root.id]
-    while stack:
-        cur = stack.pop()
-        result.append(cur)
-        stack.extend(children.get(cur, []))
-    return result
-
-
-def next_sort(db, model, project_id, parent_id) -> float:
-    """同层末尾的排序值(同层最大 + 1;空层从 1 开始)。
-
-    位置的唯一入口:建节点、移动、恢复回落都走它 —— 三处各写一遍"取 max(sort) 再加一"
-    的话,漏一处就会出现"新加的东西跑到列表中间"这种解释不了的现象。
-    只统计**未删除**的行:回收站里的内容不该继续占用可见顺序。
-
-    只适用于**有显式顺序的资源(当前是 Doc)**:文件夹与文件按名称/时间排,没有 sort 列。
-    """
-    q = (db.query(func.max(model.sort))
-         .filter(model.project_id == project_id, model.deleted_at.is_(None))
-         .filter(model.parent_id.is_(None) if parent_id is None
-                 else model.parent_id == parent_id))
-    return (q.scalar() or 0) + 1
-
-
-def ancestor_names(db, model, start_id, attr: str) -> list[str]:
-    """祖先链名称列表(根在前),用于位置上下文(location.path)。
-
-    文档的标题链与文件的文件夹链共用;深度上限 64 防数据异常成环,
-    父不存在则止步(该层之后的路径已不可信)。"""
-    names: list[str] = []
-    cur_id, depth = start_id, 0
-    while cur_id and depth < 64:
-        node = db.get(model, cur_id)
-        if not node:
-            break
-        names.insert(0, getattr(node, attr))
-        cur_id = node.parent_id
-        depth += 1
-    return names
-
-
-def location_json(db, project_id, model, start_id, attr: str) -> dict:
-    """location 契约(projectId/projectName/path)的唯一构造点。
-
-    文档(get_doc)与文件(file_meta)的响应里各带一份同形 location,消费方
-    (引用浮层、CLI --meta)靠它展示"在哪" —— 形状由这里单点保证,两个端点不可能漂移。"""
-    proj = db.get(Project, project_id)
-    return {"projectId": project_id,
-            "projectName": proj.name if proj else "",
-            "path": ancestor_names(db, model, start_id, attr)}
 
 
 class Base(DeclarativeBase):
@@ -240,21 +21,19 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(200))
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     is_disabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 可选自定义头像色；为空时仍由 id 哈希派生（呈现规则在 serialize.avatar_color）。
+    avatar_color: Mapped[str | None] = mapped_column(String(7), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
 class AuthSession(Base):
     __tablename__ = "sessions"
-    token: Mapped[str] = mapped_column(String(64), primary_key=True)  # 随机秘密,即 Cookie 值
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(index=True)
-    # 来源信息:管理后台"登录状态 / 活跃会话"用,**只在管理员接口暴露**(同事目录
-    # 与项目成员列表都没有它)。
     ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    # 最近活跃:session_context 以 >60 秒的频率刷新(与 pat.last_used_at 同一惯例,
-    # 不按请求写)。"在线" = 未过期且最近活跃在 ONLINE_WINDOW_SECONDS 内(见 auth.py)。
     last_seen_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
 
@@ -263,21 +42,27 @@ class Pat(Base):
     id: Mapped[str] = mapped_column(String(ID_LEN), primary_key=True, default=new_id)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(50))
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True)  # 秘密只在 hash 里
-    scopes: Mapped[str] = mapped_column(String(20), default="read")  # "read" 或 "read,write"
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    scopes: Mapped[str] = mapped_column(String(20), default="read")
     last_used_at: Mapped[datetime | None] = mapped_column(nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
-class LoginEvent(Base):
-    """登录审计:一次**真正跑过口令校验**的尝试落一行(冷却期内的 429 不落 —— 那可以被
-    无限刷,而当前锁状态由 throttle_state 承载)。
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (Index("ix_notifications_user_created", "user_id", "created_at"),)
+    id: Mapped[str] = mapped_column(String(ID_LEN), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(30))
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    link: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    read_at: Mapped[datetime | None] = mapped_column(nullable=True)
 
-    - email 存提交原文的规范化值:账号不存在时也要有,否则"有人在拿不存在的邮箱撞库"
-      这件事就看不见了;user_id 仅在账号存在时填。
-    - 保留期由 auth.LOGIN_EVENT_KEEP_DAYS 控制,超期分批删除。
-    """
+
+class LoginEvent(Base):
     __tablename__ = "login_events"
     __table_args__ = (Index("ix_login_events_user_created", "user_id", "created_at"),)
     id: Mapped[str] = mapped_column(String(ID_LEN), primary_key=True, default=new_id)
@@ -285,20 +70,16 @@ class LoginEvent(Base):
     email: Mapped[str] = mapped_column(String(255))
     ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    result: Mapped[str] = mapped_column(String(20))  # ok / bad_password / disabled / locked
+    result: Mapped[str] = mapped_column(String(20))
     created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
 
 
 class ThrottleState(Base):
-    """凭据尝试的节流状态(throttle.py 的机制表):一行一个键,窗口内计数 + 冷却。
-
-    key = "<策略名>:<主体>"(如 account:someone@x.com / source_ip:192.168.1.9)。
-    """
     __tablename__ = "throttle_state"
     key: Mapped[str] = mapped_column(String(300), primary_key=True)
     fail_count: Mapped[int] = mapped_column(Integer, default=0)
-    window_start: Mapped[datetime] = mapped_column(default=utcnow)  # 本轮计数的起点
-    strikes: Mapped[int] = mapped_column(Integer, default=0)  # 触发冷却的次数(退避倍增用)
+    window_start: Mapped[datetime] = mapped_column(default=utcnow)
+    strikes: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(nullable=True)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
@@ -308,17 +89,13 @@ class Project(Base):
     id: Mapped[str] = mapped_column(String(ID_LEN), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str] = mapped_column(Text, default="")
-    is_personal: Mapped[bool] = mapped_column(Boolean, default=False)  # 个人空间(每用户一个,不可删/不可管成员)
-    # 可见性:"private"(默认,仅成员可见)/ "public"。
-    # public = 本实例所有登录用户**可发现 + 可自助加入**;加入前**完全不可读**
-    # (非成员在 auth.project_role 里拿不到任何角色 → 全站 403)。
-    # 个人空间永远保持 private,服务端硬拒改动(个人空间是私有草稿区,
-    # 一旦可公开用户就不敢往里放东西,而那正是它的价值)。
+    is_personal: Mapped[bool] = mapped_column(Boolean, default=False)
     visibility: Mapped[str] = mapped_column(String(10), default="private")
-    # 自助加入后拿到的角色,仅 public 时有意义。只有 VIEWER / EDITOR 两档:
-    # 自助加入是一条**任何人**都能走的路径,绝不能拿到管理权(ADMIN/OWNER 只能由
-    # 成员管理页授予)。改这一档需要项目 ADMIN(见 projects.patch_project)。
     join_role: Mapped[str] = mapped_column(String(10), default="VIEWER")
+    # 空间偏好：颜色可空（前端回落主题色），配额为空表示不限额，归档时间非空即只读。
+    color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    quota_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
@@ -329,7 +106,7 @@ class ProjectMember(Base):
     id: Mapped[str] = mapped_column(String(ID_LEN), primary_key=True, default=new_id)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
-    role: Mapped[str] = mapped_column(String(10), default="VIEWER")  # OWNER/ADMIN/EDITOR/VIEWER
+    role: Mapped[str] = mapped_column(String(10), default="VIEWER")
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
@@ -355,9 +132,6 @@ class DocVersion(Base):
     id: Mapped[str] = mapped_column(String(ID_LEN), primary_key=True, default=new_id)
     doc_id: Mapped[str] = mapped_column(ForeignKey("docs.id"), index=True)
     content: Mapped[str] = mapped_column(Text)
-    # 快照的成因(docs.VERSION_KINDS),不是给人看的文案:"save" = 保存前那一版(默认),
-    # "restore" = 一次回退之前的现场。怎么称呼由界面决定 —— 字段只回答"这一版是怎么来的",
-    # 传输方式(WS/REST)不参与其中。
     kind: Mapped[str] = mapped_column(String(20), default="save")
     created_by: Mapped[str | None] = mapped_column(String(ID_LEN), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
@@ -367,7 +141,7 @@ class Folder(Base):
     __tablename__ = "folders"
     id: Mapped[str] = mapped_column(String(ID_LEN), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(100))
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)  # 一切归属项目
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
     parent_id: Mapped[str | None] = mapped_column(String(ID_LEN), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
@@ -377,17 +151,42 @@ class File(Base):
     __tablename__ = "files"
     id: Mapped[str] = mapped_column(String(ID_LEN), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(255))
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)  # 一切归属项目
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
     folder_id: Mapped[str | None] = mapped_column(String(ID_LEN), nullable=True)
     size: Mapped[int] = mapped_column(Integer, default=0)
     storage_path: Mapped[str] = mapped_column(String(300), unique=True)
-    # 分享:一个**可吊销**的随机 token(而不是"公开/不公开"这个布尔)。
-    # 补的是"只想共享一份文件,又不想把整个项目公开"这个缺口。用 token 而不是
-    # "公开开关"的原因:分享出去的链接要能收回 —— 布尔开关做不到,而且它把文件 id
-    # 暴露给了没登录的人(不可枚举这条性质只在 id 上,链接必须带自己的秘密)。
-    # 链接 = /api/share/{token};置空 = 立刻失效(S3 预签名 / Google Drive 同款模型)。
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_by: Mapped[str | None] = mapped_column(String(ID_LEN), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
     share_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
     share_expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(ID_LEN), nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     deleted_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class FileVersion(Base):
+    __tablename__ = "file_versions"
+    __table_args__ = (
+        UniqueConstraint("file_id", "version"),
+        Index("ix_file_versions_file", "file_id", "version"),
+    )
+    id: Mapped[str] = mapped_column(String(ID_LEN), primary_key=True, default=new_id)
+    file_id: Mapped[str] = mapped_column(ForeignKey("files.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    storage_path: Mapped[str] = mapped_column(String(300))
+    size: Mapped[int] = mapped_column(Integer)
+    # 版本备注：上传时显式填写，恢复时缺省记录来源版本。
+    note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(ID_LEN))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class FileChange(Base):
+    __tablename__ = "file_changes"
+    __table_args__ = (Index("ix_file_changes_space_seq", "space_id", "seq"),)
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str] = mapped_column(String(ID_LEN), index=True)
+    space_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    op: Mapped[str] = mapped_column(String(16))
+    at: Mapped[datetime] = mapped_column(default=utcnow, index=True)

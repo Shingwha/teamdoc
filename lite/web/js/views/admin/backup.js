@@ -133,7 +133,10 @@ window.AdminSections = window.AdminSections || {};
       return UI.loadInto(el, () => Promise.all([
         api(Endpoints.adminBackupStatus()),
         api(Endpoints.adminRestoreStatus()),
-      ]), { render: (pair) => backupHtml(pair[0], pair[1]) });
+      ]), {
+        loadingHtml: UI.skeleton('cards', 2),
+        render: (pair) => backupHtml(pair[0], pair[1]),
+      });
     }
 
     el.addEventListener('click', async (e) => {

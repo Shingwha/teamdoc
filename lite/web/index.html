@@ -1,21 +1,23 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light" data-color="blue">
+<html lang="zh-CN" data-theme="light" data-color="blue" data-density="comfortable">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TeamDoc</title>
   <!-- favicon 静态兜底用默认蓝色种子(#3370ff);theme.js 加载后会按当前种子色重绘。
        这里的值只影响"首帧到 theme.js 执行"之间的极短瞬间,故与默认色一致即可,
-       不要写死一个与 6 个种子色都不沾边的颜色(此前是 #6c5ce7,紫色且不在色板内)。 -->
+       不要写死一个与 6 个种子色都不沾边的颜色。 -->
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233370ff'/%3E%3Cpath d='M9 9h14v3H9zm0 5.5h14v3H9zm0 5.5h9v3H9z' fill='white'/%3E%3C/svg%3E">
   <script>
-    // 首屏防闪烁:在样式加载前恢复主题与种子色(与 js/theme.js 的存储键保持一致)
+    // 首屏防闪烁:在样式加载前恢复主题、种子色与密度(与 js/theme.js 的存储键保持一致)
     (function () {
       var m = localStorage.getItem('td:theme-mode') || 'system';
       var c = localStorage.getItem('td:seed-color') || 'blue';
+      var d = localStorage.getItem('td:density') === 'compact' ? 'compact' : 'comfortable';
       var dark = m === 'dark' || (m === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.dataset.theme = dark ? 'dark' : 'light';
       document.documentElement.dataset.color = c;
+      document.documentElement.dataset.density = d;
     })();
   </script>
   <!-- Remix Icon 4.5.0(class 方式);本地 vendor,断外网可用 -->
@@ -25,45 +27,44 @@
   <link rel="stylesheet" href="/css/components.css">
   <link rel="stylesheet" href="/css/app.css">
   <link rel="stylesheet" href="/css/editor.css">
+  <link rel="stylesheet" href="/css/drive.css">
+  <link rel="stylesheet" href="/css/admin.css">
 </head>
 <body>
-  <!-- 登录后的 SPA 壳:纯左右布局(侧栏三段式 + 主区);窄屏侧栏常驻 72px 图标栏,点搜索/导航项抽屉式浮出完整侧栏 -->
+  <!-- 登录后的 SPA 壳:40px 顶栏 + 左栏(空间导航 / 唯一文档树 / 云空间与回收站)+ 单一内容面 -->
   <div id="shell" hidden>
-    <aside id="sidebar">
-      <!-- 顶部:文字标 + 常驻折叠按钮(宽屏可收起为图标栏) -->
-      <div class="side-brand-row">
-        <a class="side-brand" href="#/">TeamDoc</a>
-        <button class="btn-icon" id="side-collapse" type="button" title="收起侧栏"><i class="ri-side-bar-line"></i></button>
-      </div>
-      <!-- 全局搜索:展开态为输入框;折叠态由下方按钮顶替(见 app.css .side-search-btn) -->
-      <div class="side-search">
+    <header id="topbar">
+      <button class="btn-icon" id="btn-side" type="button" title="打开导航"><i class="ri-menu-line"></i></button>
+      <button id="space-switch" class="space-switch" type="button" aria-haspopup="menu" title="切换空间">
+        <span class="space-dot" id="space-dot"></span>
+        <span class="space-name" id="space-name">选择空间</span>
+        <i class="ri-arrow-down-s-line"></i>
+      </button>
+      <button id="cmd-open" class="cmd-trigger" type="button" title="搜索或跳转(Ctrl+K)">
         <i class="ri-search-line"></i>
-        <input id="global-search" type="text" placeholder="搜索(Ctrl+K)" autocomplete="off">
+        <span>搜索或跳转</span>
+        <kbd>Ctrl K</kbd>
+      </button>
+      <div class="topbar-actions">
+        <button class="btn-icon" id="btn-notify" type="button" title="通知"><i class="ri-notification-3-line"></i></button>
+        <a class="btn-icon" id="btn-settings" href="#/settings/account" title="设置"><i class="ri-settings-3-line"></i></a>
+        <button class="btn-icon topbar-avatar" id="btn-user" type="button" title="账户"></button>
       </div>
-      <button class="side-search-btn" id="side-search-btn" type="button" title="搜索(Ctrl+K)"><i class="ri-search-line"></i></button>
-      <!-- 中间:项目(导航到项目列表)+ 项目树(可展开)+ 管理后台 + 个人设置,独立滚动 -->
-      <div class="side-body">
-        <a class="side-item" data-route="projects" href="#/" title="项目">
-          <i class="ri-folders-line"></i><span class="side-label">项目</span>
-        </a>
-        <div id="side-projects"></div>
-        <div class="side-sep"></div>
-        <a class="side-item" data-route="discover" href="#/discover" title="发现">
-          <i class="ri-compass-3-line"></i><span class="side-label">发现</span>
-        </a>
-        <a class="side-item" data-route="admin" id="side-admin" href="#/admin" title="管理后台" hidden>
-          <i class="ri-shield-user-line"></i><span class="side-label">管理后台</span>
-        </a>
-        <a class="side-item" data-route="settings" href="#/settings" title="个人设置">
-          <i class="ri-settings-3-line"></i><span class="side-label">个人设置</span>
-        </a>
-      </div>
-      <!-- 底部:用户卡片(点击向上弹出菜单) -->
-      <button class="side-user" id="side-user" type="button"></button>
-    </aside>
-    <!-- 窄屏抽屉遮罩(仅 #shell.side-open 时显示);视觉走 .scrim 基类,显示条件归壳的规则 -->
-    <div class="side-scrim scrim" id="side-scrim"></div>
-    <main id="main"><div id="view"></div></main>
+    </header>
+    <div id="shell-body">
+      <aside id="sidebar">
+        <nav id="side-nav" class="side-nav" aria-label="当前空间导航"></nav>
+        <!-- 单一文档树:只由文档模块占用;离开文档模块即清空 -->
+        <div id="side-doc-tree" class="side-doc-tree"></div>
+        <nav id="side-foot" class="side-foot" aria-label="空间资源"></nav>
+        <button class="side-collapse btn-icon" id="side-collapse" type="button" title="收起导航">
+          <i class="ri-side-bar-line"></i>
+        </button>
+      </aside>
+      <!-- 窄屏抽屉遮罩(仅 #shell.side-open 时显示);视觉走 .scrim 基类 -->
+      <div class="side-scrim scrim" id="side-scrim"></div>
+      <main id="main"><div id="view"></div></main>
+    </div>
   </div>
 
   <!-- 登录 / 初始化向导视图(无壳),由 app.js 渲染 -->
@@ -82,11 +83,20 @@
   <script src="/js/diff.js"></script>
   <script src="/js/preview.js"></script>
   <script src="/js/ref.js"></script>
-  <script src="/js/doceditor.js"></script>
+  <!-- 编辑器:C M 6 vendor + 门面(顺序不可变;视图只使用 DocEditor) -->
+  <script src="/vendor/codemirror/editor.bundle.js"></script>
+  <script src="/js/editor/markdown.js"></script>
+  <script src="/js/editor/keymap.js"></script>
+  <script src="/js/editor/theme.js"></script>
+  <script src="/js/editor/extensions.js"></script>
+  <script src="/js/editor/panels.js"></script>
+  <script src="/js/editor/index.js"></script>
   <!-- 渲染机制:路由文法(route.js)→ 作用域链(scopes.js)。必须在 views 之前 -->
   <script src="/js/route.js"></script>
   <script src="/js/scopes.js"></script>
   <script src="/js/views/recent.js"></script>
+  <script src="/js/views/home.js"></script>
+  <script src="/js/views/palette.js"></script>
   <script src="/js/views/projects.js"></script>
   <script src="/js/views/project.js"></script>
   <script src="/js/views/docs.js"></script>
@@ -94,15 +104,8 @@
   <script src="/js/views/move-target.js"></script>
   <script src="/js/views/doc-editor.js"></script>
   <script src="/js/views/drive.js"></script>
-  <script src="/js/views/search.js"></script>
-  <script src="/js/views/admin/storage.js"></script>
-  <script src="/js/views/admin/backup.js"></script>
-  <script src="/js/views/admin/projects.js"></script>
-  <script src="/js/views/admin/users.js"></script>
-  <script src="/js/views/admin/security.js"></script>
-  <script src="/js/views/admin.js"></script>
-  <script src="/js/views/discover.js"></script>
   <script src="/js/views/settings.js"></script>
   <script src="/js/app.js"></script>
+  <!-- 管理后台脚本不在此静态加载:App.loadAdmin() 仅管理员按需按序注入 -->
 </body>
 </html>

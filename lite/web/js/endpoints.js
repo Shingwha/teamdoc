@@ -30,7 +30,10 @@ window.Endpoints = (function () {
     authLogin() { return '/api/auth/login'; },
     authBootstrap() { return '/api/auth/bootstrap'; },
     authLogout() { return '/api/auth/logout'; },
+    me() { return '/api/users/me'; },
     myPassword() { return '/api/users/me/password'; },
+    mySessions() { return '/api/auth/sessions'; },
+    mySession(ref) { return '/api/auth/sessions/' + enc(ref); },
     pats() { return '/api/auth/pats'; },
     pat(id) { return '/api/auth/pats/' + enc(id); },
     users() { return '/api/users'; },
@@ -44,7 +47,11 @@ window.Endpoints = (function () {
     projectMember(pid, uid) { return projectSub(pid, '/members/' + enc(uid)); },
     projectJoin(pid) { return projectSub(pid, '/join'); },
     projectLeave(pid) { return projectSub(pid, '/leave'); },
+    projectTransfer(pid) { return projectSub(pid, '/transfer'); },
     projectStorage(pid) { return projectSub(pid, '/storage'); },
+    fileChanges(pid, since, limit) {
+      return projectSub(pid, '/file-changes') + qs({ since: since, limit: limit });
+    },
     projectTrash(pid) { return projectSub(pid, '/trash'); },
     discover() { return '/api/discover/projects'; },
 
@@ -65,7 +72,15 @@ window.Endpoints = (function () {
     files(params) { return '/api/files' + qs(params); },
     fileUpload(params) { return '/api/files/upload' + qs(params); },
     file(id) { return '/api/files/' + enc(id); },
-    fileDownload(id, inline) { return '/api/files/' + enc(id) + '/download' + (inline ? '?inline=1' : ''); },
+    fileDownload(id, inline, version) {
+      return '/api/files/' + enc(id) + '/download' +
+        qs({ inline: inline ? 1 : null, version: version });
+    },
+    fileVersions(id) { return '/api/files/' + enc(id) + '/versions'; },
+    fileVersionUpload(id, name, note) {
+      return '/api/files/' + enc(id) + '/versions' + qs({ name: name, note: note });
+    },
+    fileRestore(id) { return '/api/files/' + enc(id) + '/restore'; },
     fileMeta(id) { return '/api/files/' + enc(id) + '/meta'; },
     fileMove(id) { return '/api/files/' + enc(id) + '/move'; },
     fileShare(id) { return '/api/files/' + enc(id) + '/share'; },
@@ -82,7 +97,14 @@ window.Endpoints = (function () {
     // q 为空即"最近动态",type 取 all/docs/files(见服务端 search.py)
     search(params) { return '/api/search' + qs(params); },
 
+    // ---------- 通知 ----------
+    notifications() { return '/api/notifications'; },
+    notificationsRead() { return '/api/notifications/read'; },
+    notificationsReadAll() { return '/api/notifications/read-all'; },
+
     // ---------- 管理后台 ----------
+    adminOverview() { return '/api/admin/overview'; },
+    adminPats(params) { return '/api/admin/pats' + qs(params); },
     adminStorage() { return '/api/admin/storage'; },
     adminDiagnostics() { return '/api/admin/diagnostics'; },
     adminCleanup(params) { return '/api/admin/storage/cleanup' + qs(params); },

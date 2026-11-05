@@ -123,7 +123,11 @@ def test_page_assets_complete(base_url):
         ('id="shell"', "SPA 壳节点"),
         ('id="login-root"', "登录视图节点"),
         ('id="toast-root"', "Toast 容器"),
-        ('id="side-projects"', "侧栏项目树容器"),
+        ('id="topbar"', "40px 顶栏"),
+        ('id="space-switch"', "空间切换器"),
+        ('id="btn-notify"', "顶栏通知入口"),
+        ('id="side-nav"', "左栏空间导航"),
+        ('id="side-doc-tree"', "左栏唯一文档树槽位"),
     ]:
         if probe not in html:
             problems.append(f"index.html 缺少{desc}")

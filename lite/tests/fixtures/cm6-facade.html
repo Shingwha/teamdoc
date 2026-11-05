@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>CM6 facade verification</title>
+  <link rel="stylesheet" href="/web/css/tokens.css">
+  <link rel="stylesheet" href="/web/css/base.css">
+  <link rel="stylesheet" href="/web/css/components.css">
+  <link rel="stylesheet" href="/web/css/app.css">
+  <link rel="stylesheet" href="/web/css/editor.css">
+</head>
+<body>
+  <div id="host"></div>
+  <pre id="result">RUNNING</pre>
+  <script src="/web/js/api.js"></script>
+  <script src="/web/js/endpoints.js"></script>
+  <script src="/web/js/ui.js"></script>
+  <script src="/web/js/ref.js"></script>
+  <script src="/web/vendor/codemirror/editor.bundle.js"></script>
+  <script src="/web/js/editor/markdown.js"></script>
+  <script src="/web/js/editor/keymap.js"></script>
+  <script src="/web/js/editor/theme.js"></script>
+  <script src="/web/js/editor/extensions.js"></script>
+  <script src="/web/js/editor/panels.js"></script>
+  <script src="/web/js/editor/index.js"></script>
+  <script>
+    window.addEventListener('load', async function () {
+      var failures = [];
+      function check(value, message) { if (!value) failures.push(message); }
+      try {
+        var changes = 0, saves = 0;
+        var editor = DocEditor.mount(document.getElementById('host'), {
+          value: '# 标题', projectId: 'static', upload: function () {},
+          onChange: function () { changes++; }, onSave: function () { saves++; }
+        });
+        check(!!document.querySelector('#host .cm-editor'), 'EditorView 未挂载');
+        check(!!document.querySelector('#host .cm-line'), 'Markdown 行未渲染');
+        editor.setValue('abc', { preserveSelection: true });
+        check(changes === 0, 'setValue 触发 onChange');
+        var content = document.querySelector('#host .cm-content');
+        content.focus();
+        document.execCommand('selectAll');
+        var transfer = new DataTransfer();
+        transfer.setData('text/plain', '浏览器输入');
+        content.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true }));
+        check(editor.getValue() === '浏览器输入', '真实输入未进入 EditorState');
+        check(changes === 1, '用户输入 onChange 次数=' + changes);
+        content.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }));
+        check(saves === 1, 'Ctrl+S 次数=' + saves);
+        content.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true }));
+        check(!!document.querySelector('#host .cm-search'), '搜索面板未打开');
+        var searchInput = document.querySelector('#host .cm-search input');
+        searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        editor.setValue('');
+        content.focus();
+        await new Promise(function (resolve) { setTimeout(resolve, 80); });
+        document.execCommand('insertText', false, '/');
+        await new Promise(function (resolve) { setTimeout(resolve, 100); });
+        check(!!document.querySelector('.td-editor-panel'), '斜杠菜单未打开');
+        content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+        editor.setValue('选区文字');
+        content.focus();
+        await new Promise(function (resolve) { setTimeout(resolve, 80); });
+        var line = document.querySelector('#host .cm-line');
+        var selection = window.getSelection(), range = document.createRange();
+        range.selectNodeContents(line);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        await new Promise(function (resolve) { setTimeout(resolve, 150); });
+        var float = document.querySelector('.td-floatbar');
+        check(float && !float.hidden, '选区浮动条未显示');
+        if (float) float.querySelector('button').click();
+        check(editor.getValue() === '**选区文字**', '浮动条加粗失败: ' + editor.getValue());
+        editor.setValue('# A\n## B');
+        check(editor.getHeadings().length === 2, '大纲解析失败');
+        check(editor.scrollToHeading('heading-2'), '大纲跳转失败');
+        editor.destroy();
+        check(document.getElementById('host').children.length === 0, 'destroy 未清空 DOM');
+      } catch (error) { failures.push(error.stack || error.message); }
+      document.getElementById('result').textContent = failures.length ? 'FAIL\n' + failures.join('\n') : 'PASS';
+    });
+  </script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 覆盖:
   1. 分页:offset/limit 生效,total 为真实总数,hasMore 正确
   2. 服务端排序:name / time / size 升序降序,翻页不重不漏(按 id 定序)
-  3. 重名:上传自动加后缀(foo(2).png);新建/重命名遇重名 409
+  3. 重名:普通上传 409,name_mode=keep 才自动加后缀;新建/重命名遇重名 409
   4. 改名会改掉扩展名时 mime 跟着重算
   5. 项目占用统计:活跃与回收站分列,删文件后活跃减少、回收站增加
   6. 最近文件:跨项目返回,带项目名;不可见项目不出现
@@ -72,13 +72,18 @@ def test_paging_and_server_sorting(admin):
 def test_duplicate_names_and_rename_mime(admin):
     pid = _new_project(admin, "云空间重名测试")
 
-    # === 重名处理 ===
+    # === 普通撞名 409；只有显式 keep 才保留两个 ===
     first = admin.upload(pid, "同名.txt", b"first").data
     assert first["name"] == "同名.txt", f"首次上传名字保持不变: {first['name']}"
-    second = admin.upload(pid, "同名.txt", b"second").data
-    assert second["name"] == "同名(2).txt", f"重名上传自动加后缀: {second['name']}"
-    third = admin.upload(pid, "同名.txt", b"third").data
-    assert third["name"] == "同名(3).txt", f"第三次上传 (3): {third['name']}"
+    conflict = admin.upload(pid, "同名.txt", b"conflict")
+    assert conflict.status == 409, f"普通撞名应 409: {conflict.data}"
+    detail = conflict.data["detail"]
+    assert detail["code"] == "name_exists", f"撞名机器码: {detail}"
+    assert detail["existing"]["id"] == first["id"], f"返回已有文件现场: {detail}"
+    second = admin.upload(pid, "同名.txt", b"second", name_mode="keep").data
+    assert second["name"] == "同名(2).txt", f"keep 重名上传自动加后缀: {second['name']}"
+    third = admin.upload(pid, "同名.txt", b"third", name_mode="keep").data
+    assert third["name"] == "同名(3).txt", f"第三次 keep 上传 (3): {third['name']}"
     # 三个都在
     lst = admin.get(f"/api/files?project_id={pid}&limit=500").data
     same = sorted(f["name"] for f in lst["files"] if f["name"].startswith("同名"))

@@ -42,8 +42,19 @@ window.Theme = (function () {
     var html = document.documentElement;
     html.dataset.theme = resolved();
     html.dataset.color = getColor();
+    applyDisplayPrefs();
     applyFavicon();
     listeners.slice().forEach(function (fn) { try { fn(resolved()); } catch (e) { /* 忽略 */ } });
+  }
+
+  /** 密度与正文字号:偏好页改动即时生效,启动时也由 apply() 恢复。
+      字号写 --fs-prose —— 编辑源码与预览共用这一档,两处同时变才算"预览联动"。 */
+  function applyDisplayPrefs() {
+    var html = document.documentElement;
+    html.dataset.density = localStorage.getItem('td:density') === 'compact' ? 'compact' : 'comfortable';
+    var size = parseInt(localStorage.getItem('td:editor-font-size'), 10);
+    if (!(size >= 13 && size <= 20)) size = 16;
+    html.style.setProperty('--fs-prose', size + 'px');
   }
 
   /** favicon 跟随种子色(原设计:圆角方块 + 三条文档线,只把底色从写死的紫色
@@ -90,5 +101,5 @@ window.Theme = (function () {
   });
   apply();
 
-  return { MODES, COLORS, getMode, getColor, isDark, setMode, setColor, onChange };
+  return { MODES, COLORS, getMode, getColor, isDark, setMode, setColor, onChange, apply };
 })();

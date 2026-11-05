@@ -1,12 +1,13 @@
 """公开项目"自助加入"的浏览器演练:用一个**未加入**的账号真实点一遍两条入口。
 
-为什么必须真点:这条链路几乎全在浏览器里 —— 卡片点击被委托拦下(不该跳转)、
-弹框的两个出口、加入后的三件事(入库 / 侧栏出现该项目 / 落到项目文档页)、
-以及"同事发来的直链"落到的 403 错误态有没有出路。接口测试覆盖不到这些,
+为什么必须真点:这条链路几乎全在浏览器里 —— 切换器页签的选择、卡片点击被弹框拦下
+(不该直接跳转)、弹框的两个出口、加入后的三件事(入库 / 侧栏出现该项目 / 落到项目
+文档页),以及"同事发来的直链"落到的 403 错误态有没有出路。接口测试覆盖不到这些,
 而"点了没反应""拦没拦住"正是这类改动的典型失败形态。
 
-两条入口(mode 参数区分,同一份脚本):
-  discover —— 发现页点卡片:必须弹框询问而**不是**直接进入
+两条入口(mode 参数区分):
+  switcher —— 空间切换器 → 发现空间 → 加入:必须弹框询问而**不是**直接进入
+              (发现页已并入切换器页签,不再有 #/discover 整页)
   direct   —— 直链打开 #/p/{id}/docs:错误态要给「加入项目」按钮,点了能加入
 
 跑完都断言:落到 #/p/{id}/docs、文档树里看得到文档、侧栏长出该项目(模块导航由此而来)。
@@ -30,7 +31,7 @@ JOIN_DRILL_INJECT = '''  <script>
     var OUT = {};
     var QS = new URLSearchParams(location.search);
     var PID = QS.get('pid') || '';
-    var MODE = QS.get('mode') || 'discover';
+    var MODE = QS.get('mode') || 'switcher';
     function report() {
       var l = ['hash=' + location.hash, 'errors=' + (window.__errors.join(' | ') || 'none')];
       Object.keys(OUT).forEach(function (k) { l.push(k + '=' + OUT[k]); });
@@ -41,8 +42,8 @@ JOIN_DRILL_INJECT = '''  <script>
     }
     function afterJoin() {
       OUT.hashAfterJoin = location.hash;
-      OUT.sidebarHasProject =
-        document.querySelector('#side-projects [data-pid="' + PID + '"]') ? 1 : 0;
+      OUT.spaceNameText =
+        (document.getElementById('space-name') || {}).textContent || '';
       var tree = document.getElementById('doc-tree');
       OUT.docTreeText = tree ? tree.textContent.replace(/\\s+/g, ' ').trim().slice(0, 60) : '(无文档树)';
       report();
@@ -56,13 +57,30 @@ JOIN_DRILL_INJECT = '''  <script>
         var btn = document.querySelector('#proj-join');
         if (!btn) { report(); return; }
         btn.click();
-      } else {
-        var card = document.querySelector('.card-link[data-pid="' + PID + '"]');
-        OUT.cardFound = card ? 1 : 0;
-        if (!card) { report(); return; }
-        card.click();
+        setTimeout(step2, 800);
+        return;
       }
-      setTimeout(step2, 800);
+      // 切换器 → 发现空间页签 → 目标空间的「加入」
+      var sw = document.getElementById('space-switch');
+      if (!sw) { report(); return; }
+      sw.click();
+      setTimeout(function () {
+        OUT.switchOpened = document.querySelector('.space-switcher') ? 1 : 0;
+        var tab = document.querySelector('.space-switcher [data-ss-tab="discover"]');
+        OUT.discoverTab = tab ? 1 : 0;
+        if (!tab) { report(); return; }
+        tab.click();
+        setTimeout(function () {
+          var row = document.querySelector('.space-switcher .ss-disc-row[data-pid="' + PID + '"]');
+          OUT.cardFound = row ? 1 : 0;
+          if (!row) { report(); return; }
+          var join = row.querySelector('.ss-join');
+          OUT.joinButton = join ? 1 : 0;
+          if (!join) { report(); return; }
+          join.click();
+          setTimeout(step2, 800);
+        }, 1500);
+      }, 500);
     }
     function step2() {
       OUT.hashBeforeJoin = location.hash;
@@ -75,7 +93,7 @@ JOIN_DRILL_INJECT = '''  <script>
     }
     window.addEventListener('load', function () {
       setTimeout(function () {
-        location.hash = MODE === 'direct' ? ('#/p/' + PID + '/docs') : '#/discover';
+        location.hash = MODE === 'direct' ? ('#/p/' + PID + '/docs') : '#/';
         window.dispatchEvent(new HashChangeEvent('hashchange'));
         setTimeout(step1, 2600);
       }, 150);
@@ -111,21 +129,24 @@ def _assert_joined(info):
         f"加入后应落到该项目的文档页: {info.get('hashAfterJoin')}"
     assert "加入后可读的文档" in (info.get("docTreeText") or ""), \
         f"加入后文档树里应看得到文档: {info.get('docTreeText')}"
-    assert info.get("sidebarHasProject") == "1", \
-        "加入后侧栏没有该项目 —— 项目内模块导航会整块缺失"
+    assert "演练公开项目" in (info.get("spaceNameText") or ""), \
+        f"加入后顶栏没有切到该空间: {info.get('spaceNameText')}"
 
 
-def test_join_drill_from_discover(base_url, admin):
-    """未加入者在广场点卡片:先问一句,加入后立即可读。"""
+def test_join_drill_from_space_switcher(base_url, admin):
+    """未加入者从空间切换器的「发现空间」页签加入:先问一句,加入后立即可读。"""
     chrome = find_chrome()
     if not chrome:
         pytest.skip("未找到 Chrome/Edge,跳过自助加入演练")
 
-    info = _drill(base_url, admin, chrome, mode="discover")
+    info = _drill(base_url, admin, chrome, mode="switcher")
     assert info.get("errors", "?") == "none", f"演练页 JS 错误: {info.get('errors')}"
-    assert info.get("cardFound") == "1", "发现页里没有这个公开项目的卡片"
-    assert info.get("hashBeforeJoin") == "#/discover", \
-        f"未加入者点卡片不该直接进入(应弹框询问): {info.get('hashBeforeJoin')}"
+    assert info.get("switchOpened") == "1", "空间切换器没有打开"
+    assert info.get("discoverTab") == "1", "空间切换器缺少「发现空间」页签"
+    assert info.get("cardFound") == "1", "发现页签里没有这个公开空间的条目"
+    assert info.get("joinButton") == "1", "发现条目上没有「加入」按钮"
+    assert info.get("hashBeforeJoin") == "#/", \
+        f"未加入者点「加入」不该直接进入(应弹框询问): {info.get('hashBeforeJoin')}"
     _assert_joined(info)
 
 
