@@ -14,7 +14,7 @@ from security.context import (Actor, ensure_space_mutable, get_project_or_404,
 from serialize import iso
 from serialize import project_json as project_shape
 from serialize import user_json
-from services import notifications, versions
+from services import notifications, quota, versions
 from services.users import login_status
 
 ROLES = ("OWNER", "ADMIN", "EDITOR", "VIEWER")
@@ -42,13 +42,16 @@ def batch_stats(db: DbSession, ids) -> dict:
                  .filter(File.project_id.in_(ids), File.deleted_at.is_(None))
                  .group_by(File.project_id).all())}
     out = {}
+    usage = quota.usage_map(db, ids)
     for pid in ids:
         d_cnt, d_last = doc_agg.get(pid, (0, None))
         f_sz, f_last = file_agg.get(pid, (0, None))
         lasts = [x for x in (d_last, f_last) if x is not None]
         out[pid] = {"memberCount": member_counts.get(pid, 0), "docCount": d_cnt,
                     "lastUpdatedAt": max(lasts) if lasts else None,
-                    "storageBytes": int(f_sz)}
+                    "storageBytes": int(f_sz),
+                    # 配额口径：当前 + 历史版本 + 回收站，按物理路径去重。
+                    "quotaUsedBytes": int(usage.get(pid, 0))}
     return out
 
 
@@ -165,10 +168,10 @@ def create_project(db: DbSession, payload: dict, ctx: Actor) -> dict:
     name = str_field(payload, "name", 100, required=True)
     description = str_field(payload, "description", 5000)
     color = color_field(payload, "color") if "color" in payload else None
-    quota = quota_field(payload) if "quotaBytes" in payload else None
+    quota_bytes = quota_field(payload) if "quotaBytes" in payload else None
     invites = _invites(db, payload)
     p = Project(name=name, description=description, created_by=ctx.user.id,
-                color=color, quota_bytes=quota)
+                color=color, quota_bytes=quota_bytes)
     db.add(p)
     db.flush()
     db.add(ProjectMember(project_id=p.id, user_id=ctx.user.id, role="OWNER"))
