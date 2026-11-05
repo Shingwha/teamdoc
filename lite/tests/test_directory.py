@@ -16,7 +16,8 @@ from _harness import Client, make_user
 ADMIN_EMAIL = "admin@teamdoc.local"
 
 
-def test_directory_readable_and_field_surface(admin):
+def test_directory_access_and_field_surface(base_url, admin):
+    """管理员与普通用户都能读同一目录；字段面固定，未登录 401，管理接口仍 403。"""
     r = admin.get("/api/users/directory")
     assert r.status == 200, f"管理员可读目录: {r.status}"
     d = r.data
@@ -29,18 +30,15 @@ def test_directory_readable_and_field_surface(admin):
             f"字段恰为 id/name/email/avatarColor: {sorted(keys)}"
         assert all(u.get("avatarColor") for u in d), "avatarColor 非空"
 
-
-def test_plain_user_can_read_directory(base_url, admin):
     plain_email, _ = make_user(admin, "目录测试员", "plain12345")
     plain = Client(base_url)
     plain.login(plain_email, "plain12345")
-    admin_dir = admin.get("/api/users/directory").data
     r = plain.get("/api/users/directory")
     assert r.status == 200, f"普通用户可读目录 → 200(此前只有管理后台能看到人): {r.status}"
     d2 = r.data
-    assert isinstance(d2, list) and len(d2) >= len(admin_dir) - 1, \
-        f"普通用户看到的人数与管理员的相近: {len(d2) if d2 else 0} vs {len(admin_dir)}"
-    assert plain.get("/api/users").status == 403, "但用户管理接口仍拒绝普通用户(403)"
+    assert isinstance(d2, list) and len(d2) >= len(d) - 1, \
+        f"普通用户看到的人数与管理员相近: {len(d2) if d2 else 0} vs {len(d)}"
+    assert plain.get("/api/users").status == 403, "用户管理接口拒绝普通用户(403)"
     assert Client(base_url).get("/api/users/directory").status == 401, "未登录访问目录 → 401"
 
 

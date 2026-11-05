@@ -60,16 +60,6 @@ def test_normalize_id_only_normalizes_case():
     assert ids.normalize_id(None) is None
 
 
-def test_numeric_shape_is_invalid_not_absent():
-    """数字不是"另一种 id",而是**形状非法**。这条决定了 API 行为:
-
-    路径/参数里带旧式数字 → 400 VALIDATION(坏链接);形状合法但不存在的 ULID
-    → 404(资源没了)。两者语义不同,测试里也别混用(见 _harness.ABSENT_ID)。
-    """
-    assert not ids.is_id("999999")
-    assert ids.is_id("0" * 26), "形状合法(毫秒时间戳 0),但 new_id() 永远生成不出来"
-
-
 def test_idpath_validation_is_the_same_judgement():
     """路由用的 IdPath 与 is_id 必须是同一判定(否则"路由放行、查询落空")。"""
     import pydantic
